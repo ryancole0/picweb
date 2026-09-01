@@ -1,0 +1,13 @@
+# Source photos never go in git (§5.4)
+.cache/
+photos/
+gallery/
+gallery_prev/
+*_original
+
+# Build output and index
+gallery/
+.cache/
+
+# windows -> WSL 
+**/*.identifier

@@ -1,0 +1,30 @@
+{
+  "input": "/input",
+  "output": "/output",
+  "database-file": "/cache/thumbsup.db",
+  "log-file": "/cache/thumbsup.log",
+
+  "title": "Family",
+  "theme": "mosaic",
+  "home-album-name": "Home",
+  "locale": "en",
+
+  "albums-from": ["%keywords"],
+  "sort-albums-by": "title",
+  "sort-media-by": "date",
+
+  "thumb-size": 400,
+  "small-size": 400,
+  "large-size": 1600,
+  "photo-quality": 82,
+  "photo-preview": "resize",
+  "photo-download": "resize",
+
+  "include-photos": true,
+  "include-videos": false,
+  "include-raw-photos": false,
+
+  "embed-exif": true,
+  "cleanup": true,
+  "concurrency": 4
+}

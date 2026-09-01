@@ -1,0 +1,17 @@
+# Allowed tags. Anything not listed here is removed from the photo files by
+# prune-tags.py. This file is the source of truth for the tag vocabulary;
+# digiKam's tag tree is downstream of it.
+#
+# - Hierarchical tags use "/" exactly as digiKam displays them.
+# - Ancestors of a listed tag are kept automatically: listing "Steder/Bergen"
+#   keeps a bare "Steder" as well.
+# - Matching is case-sensitive, like digiKam.
+# - Every path segment becomes an album in the gallery (%keywords), so keep the
+#   list short and deliberate.
+
+tags = [
+  # test
+  "b1",
+  "Personer/b2",  
+  "b3",
+]
