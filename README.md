@@ -79,7 +79,7 @@ az staticwebapp hostname set -n "$SWA" -g "$RG" \
   --validation-method dns-txt-token \
   --no-wait
 ```
-* run the following to check if token creation is finished.  Expect Status -> Validating
+* run the following to check if token creation is finished (Status -> Validating)
 ```
 az staticwebapp hostname show -n "$SWA" -g "$RG" \
   --hostname "$HOST" \
@@ -88,7 +88,7 @@ az staticwebapp hostname show -n "$SWA" -g "$RG" \
 * At DNS registrar create a 
   * a TXT record on _dnsauth.family.colecreations.no, using only the token value output from previous step
   * a CNAME record on family, pointing to the default URI for the static web app: <>.azurestaticapps.net
-* Re-run hostname show until status is Ready — expect roughly ten minutes. 
+* Re-run hostname show until status is Ready
 ```bash
 az staticwebapp hostname show -n "$SWA" -g "$RG" \
   --hostname "$HOST" \
@@ -120,11 +120,11 @@ The static web app source includes a config file that specifies which environmen
 ### Privacy controls for domain
 Add the following DNS records to prevent others from sending email that look like they come from the site (SPF + DMARC), and prevent anyone from claiming the domain with a DKIM signature.
 * SPF
-  * <domain-name> | TXT | "v=spf1 -all" 
+  * domain-name | TXT | "v=spf1 -all" 
 * DMARC
-  * _dmarc.<domain-name>  TXT  "v=DMARC1; p=reject; rua=mailto:dmarc@somewhere-you-read.example" 
+  * _dmarc.domain-name  TXT  "v=DMARC1; p=reject; rua=mailto:dmarc@somewhere-you-read.example" 
 * DKIM
-  * *._domainkey.<domain-name>  TXT  "v=DKIM1; p="
+  * *._domainkey.domain-name  TXT  "v=DKIM1; p="
 
 # Update the website
 ## Generating gallery photos
