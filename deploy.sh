@@ -6,7 +6,8 @@ if ! az account show &> /dev/null; then
     exit 1
 fi
 
-cp staticwebapp.config.json gallery/        # from stage 3 onwards
+cp static/staticwebapp.config.json gallery/
+cp static/denied.html gallery/
 
 # Fetch the current deployment token
 TOKEN=$(az staticwebapp secrets list -n "$SWA" -g "$RG" \
@@ -14,5 +15,8 @@ TOKEN=$(az staticwebapp secrets list -n "$SWA" -g "$RG" \
 
 # 3. Deploy.
 npx --yes @azure/static-web-apps-cli@latest deploy ./gallery \
+  --api-location ./api \
+  --api-language python \
+  --api-version 3.11 \
   --deployment-token "$TOKEN" \
   --env production

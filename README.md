@@ -1,27 +1,31 @@
-# Thumbsup gallery, local -> Azure
+# Thumbsup gallery as SWA
 
-Goal: prove the generator, the theme, and the keywords-to-albums mapping before any
-Azure resource exists. No auth, no deployment.
+Minimal gallery website, hosted as a Static Web App, using Google Oauth for login and a custom Python function to restrict access to a specific set of users
 
 ## Environment
-Local development in Ubuntu/WSL, deploy to Static Web App in Azure
-
-
+Local development in Ubuntu/WSL, deploy to Static Web App in Azure, auth from Google
 
 ## Layout
 
 ```
 picweb/
-  build.sh          docker run wrapper
-  serve.sh          local static server
-  deploy.sh         update existing SWA with new source
-  thumbsup.json     all build options
-  prune-tags.py     remove all tags not contained in tags-allowed.toml
-  tags-allowed.toml list of allowed tags
-  azure_setup/      Bicep files to deploy SWA (without source)
-  photos/           your demo photos (gitignored)
-  gallery/          generated output (gitignored)
-  .cache/           generated thumbsup.db + log (gitignored)
+  update_swa_auth.sh    update environment variables in SWA used for authentication, including list of allowed users 
+  build.sh              build html source for gallery application based on photos in photos/, using tags as gallery labels
+  serve.sh              run local server (will have to disable some auth for this to work)
+  deploy.sh             update existing SWA with new source
+  thumbsup.json         all build options for Thumbsup
+  prune-tags.py         script to whitelist photo tags from tags-allowed.toml
+  tags-allowed.toml     list of allowed tags
+  size-check.sh         helper shell script to check if size of website exceeds SWA limits
+  api/                  custom Python function to whitelist access to specific users 
+  azure_setup/          Bicep files to deploy raw SWA 
+  static/               Static denied.html and staticwebapp.config.json files
+
+Ignored folders:
+  photos/               input photos 
+  gallery/              generated html source 
+  .cache/               generated thumbsup.db + log 
+  .secrets/             client id, client secret, and list of allowed email addresses
 ```
 
 ## Setup
@@ -44,15 +48,16 @@ sudo apt update && sudo apt install -y nodejs
 ```
 * modify permissions
 ```bash
-chmod +x build.sh serve.sh prune-tags.py
+chmod +x build.sh serve.sh deploy.sh size-check.sh update_swa_auth.sh prune-tags.py
 mkdir -p photos
 ```
 
-### Configure Azure
+## Initial Azure Setup
+### Create empty resource group and Static Web App
 * requires an exisitng subscription
 ```bash
 RGNAME="rg-picweb"
-az group create -n $RGNAME -l norwayeast
+az group create -n $RGNAME -l westeurope
 
 az deployment group create \
   -g $RGNAME \
@@ -61,30 +66,63 @@ az deployment group create \
   --query properties.outputs
 ```
 
-Record `staticWebAppName` and `defaultHostname` from the output.
+### Update SWA with custom domain
+Need to manually facilitate handshake by generating a token from Azure for a TXT record, then setting that TXT record on the domain server with domain host, then add CNAME to default hostname
+* initiate token generation from Azure (note the no-wait)
+```bash
+RG=rg-picweb
+SWA=swa-picweb-gallery
+HOST=family.colecreations.no
 
-
-## Demo photos
-
-Use 30–60 throwaway or public-domain JPEGs — **not** family photos. Stage 2 puts this
-same output on a public hostname before auth exists.
-
-Organise them into folders so you can bulk-tag by folder:
-
+az staticwebapp hostname set -n "$SWA" -g "$RG" \
+  --hostname "$HOST" \
+  --validation-method dns-txt-token \
+  --no-wait
 ```
-photos/
-  bergen/
-  hytta/
-  jul-2019/
+* run the following to check if token creation is finished.  Expect Status -> Validating
+```
+az staticwebapp hostname show -n "$SWA" -g "$RG" \
+  --hostname "$HOST" \
+  --query "{status:status, token:validationToken}" -o table
+```
+* At DNS registrar create a 
+  * a TXT record on _dnsauth.family.colecreations.no, using only the token value output from previous step
+  * a CNAME record on family, pointing to the default URI for the static web app: <>.azurestaticapps.net
+* Re-run hostname show until status is Ready — expect roughly ten minutes. 
+```bash
+az staticwebapp hostname show -n "$SWA" -g "$RG" \
+  --hostname "$HOST" \
+  --query "{status:status, token:validationToken}" -o table
 ```
 
-Deliberately include one folder name with a space and one with `æ`/`ø`/`å`. Those
-become album names, then URLs, and URL-encoding of non-ASCII album paths is exactly
-the kind of thing that works locally and breaks on a CDN.
+### Google Auth
+* OAuth consent screen / Google Auth Platform
+  * User type: External.
+  * Authorized domains: add colecreations.no
+  * Leave in Testing and only listed test users can sign in 
+* Credentials → Create credentials → OAuth client ID → Web application.
+  * Authorized JavaScript origins: leave empty
+  * Authorized redirect URIs: add both.
+    * https://family.colecreations.no/.auth/login/google/callback
+    * https://<swa-default-hostname>/.auth/login/google/callback
+* Data Access -> Add or remove scopes -> add the following non-sensitive scopes:
+  * openid
+  * ../auth/userinfo.profile
+  * ../auth/userinfo.email
 
 
+### Configure Static Web App to use Oauth
+The static web app source includes a config file that specifies which environment variables to use to fetch secrets and other configuration from the runtime environment.  We need to populate those variables in the runtime environment so they can be utilized, using secrets from `.secrets/` and `family-allowlist.txt`
+```bash
+./update_swa_auth.sh
+```
 
-## Tagging
+# Update the website
+## Generating gallery photos
+
+Copy desired photos into photos folder.  If desired, create folder structure to implicitly assign tags based on folder contents.  Recommend stripping tags first.  Otherwise, use existing photo tags but strip undesired tags using prune_tags.py script.
+
+### Tagging
 - Reading tags:
 ```bash
 exiftool -Keywords -s -r photos
@@ -110,30 +148,13 @@ exiftool -overwrite_original -Keywords+="favoritter" photos/bergen/IMG_0001.jpg
 exiftool -overwrite_original -Keywords+="Steder/Bergen" photos/bergen/IMG_0002.jpg
 ```
 
-## Build and view
+## Build html and view
 ```bash
 ./build.sh          # or: Ctrl+Shift+B in VS Code
 ./serve.sh          # run locally open http://localhost:8080
 ./deploy.sh         # deploy static web app
 ```
 
-VS Code forwards the port to Windows automatically; the URL works in your normal
-browser. First build pulls a ~340 MB image and processes serially-ish; later builds
-are incremental and only touch changed files.
-
-
-## Gotchas
-
-- **Changing `thumb-size`, `large-size`, `photo-quality` or `gm-args` does not
-  regenerate existing media.** Thumbsup only reprocesses files whose *source* changed.
-  To re-test sizing: `rm -rf gallery .cache && ./build.sh` (VS Code task
-  "gallery: rebuild from scratch"). Settle the numbers now — stage 4 against 5 GB is
-  not where you want to discover you need a rebuild.
-- **Videos are off** (`include-videos: false`). A single re-encoded clip can eat a
-  meaningful slice of the 500 MB per-environment cap. Turn them on deliberately, if at all.
-- **Dates render in the container's timezone.** `build.sh` mounts `/etc/localtime`, so
-  set the WSL timezone correctly (`sudo dpkg-reconfigure tzdata`) or dates are GMT.
-- **No `seo-location`.** It generates `robots.txt` and `sitemap.xml`; App B wants the
-  opposite (§2).
-- **`cleanup: true`** deletes output media no longer referenced by any album. Keeps the
-  deployable size honest. It never touches `photos/`.
+## Update allowed user list
+* edit `.secrets/family-allowlist.txt` to add/remove users
+* run `./update_swa_auth.sh` to update "list of allowed users" environment variable in SWA

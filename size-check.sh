@@ -29,7 +29,7 @@ WARN_PCT=80
 # anything else that ships with it. Count what will actually be uploaded, not
 # just the Thumbsup output.
 PAYLOAD=("$OUT")
-[[ -f "$ROOT/staticwebapp.config.json" ]] && PAYLOAD+=("$ROOT/staticwebapp.config.json")
+[[ -f "$ROOT/static/staticwebapp.config.json" ]] && PAYLOAD+=("$ROOT/static/staticwebapp.config.json")
 [[ -d "$ROOT/api" ]] && PAYLOAD+=("$ROOT/api")
 
 [[ -d "$OUT" ]] || { echo "No output at $OUT — run ./build.sh first." >&2; exit 1; }

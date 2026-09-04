@@ -9,5 +9,10 @@ gallery_prev/
 gallery/
 .cache/
 
-# windows -> WSL 
+# windows -> WSL \
 **/*.identifier
+
+# ignore secrets
+*.apps.googleusercontent.com.json
+.secrets/
+.env

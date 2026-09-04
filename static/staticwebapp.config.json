@@ -1,0 +1,35 @@
+{
+  "auth": {
+    "rolesSource": "/api/GetRoles",
+    "identityProviders": {
+      "customOpenIdConnectProviders": {
+        "google": {
+          "registration": {
+            "clientIdSettingName": "GOOGLE_CLIENT_ID",
+            "clientCredential": { "clientSecretSettingName": "GOOGLE_CLIENT_SECRET" },
+            "openIdConnectConfiguration": {
+              "wellKnownOpenIdConfiguration": "https://accounts.google.com/.well-known/openid-configuration"
+            }
+          },
+          "login": { "nameClaimType": "email", "scopes": ["openid", "profile", "email"] }
+        }
+      }
+    }
+  },
+  "platform": { "apiRuntime": "python:3.11" },
+  "routes": [
+    { "route": "/.auth/*", "allowedRoles": ["anonymous", "authenticated"] },
+    { "route": "/login", "redirect": "/.auth/login/google" },
+    { "route": "/logout", "redirect": "/.auth/logout" },
+    { "route": "/api/GetRoles", "allowedRoles": ["anonymous", "authenticated"] },
+    { "route": "/denied.html", "allowedRoles": ["anonymous", "authenticated"] },
+    { "route": "/*", "allowedRoles": ["family"] }
+  ],
+  "responseOverrides": {
+    "401": { "statusCode": 302, "redirect": "/login" },
+    "403": { "statusCode": 302, "redirect": "/denied.html" }
+  },
+  "globalHeaders": {
+    "X-Robots-Tag": "noindex, nofollow"
+  }
+}

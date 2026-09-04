@@ -16,11 +16,11 @@ if [[ ! -d "$PHOTOS" ]]; then
   exit 1
 fi
 
-# delete all *.identifier files in photos folders
-for d in photos/*/; do
-  name="$(basename "$d")"
-  find "$d" -maxdepth 1 -type f -iname '*.identifier' -print -delete
-done
+# delete all *.identifier files in photos/ and its immediate subfolders
+find photos -maxdepth 2 -type f -iname '*.identifier' -print -delete
+
+# strip GPS info
+exiftool -gps:all= photos/
 
 case "$PHOTOS" in
   /mnt/[a-z]/*)
@@ -49,8 +49,6 @@ printf 'files:  %s\n' "$(find "$OUT" -type f | wc -l)"
 printf 'photos: %s\n' "$(find "$PHOTOS" -type f \( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' -o -iname '*.heic' \) | wc -l)"
 echo "SWA Standard caps: 500 MB per environment, 15,000 files."
 echo "====================================================="
-
-cp staticwebapp.config.json gallery/
 
 ./size-check.sh
 
