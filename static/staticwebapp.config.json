@@ -23,6 +23,7 @@
     { "route": "/logout", "redirect": "/.auth/logout" },
     { "route": "/api/GetRoles", "allowedRoles": ["anonymous", "authenticated"] },
     { "route": "/denied.html", "allowedRoles": ["anonymous", "authenticated"] },
+    { "route": "/privacy.html", "allowedRoles": ["anonymous", "authenticated"] },
     { "route": "/*", "allowedRoles": ["family"] }
   ],
   "responseOverrides": {
