@@ -117,6 +117,15 @@ The static web app source includes a config file that specifies which environmen
 ./update_swa_auth.sh
 ```
 
+### Privacy controls for domain
+Add the following DNS records to prevent others from sending email that look like they come from the site (SPF + DMARC), and prevent anyone from claiming the domain with a DKIM signature.
+* SPF
+  * <domain-name> | TXT | "v=spf1 -all" 
+* DMARC
+  * _dmarc.<domain-name>  TXT  "v=DMARC1; p=reject; rua=mailto:dmarc@somewhere-you-read.example" 
+* DKIM
+  * *._domainkey.<domain-name>  TXT  "v=DKIM1; p="
+
 # Update the website
 ## Generating gallery photos
 
