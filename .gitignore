@@ -8,6 +8,7 @@ gallery_prev/
 # Build output and index
 gallery/
 .cache/
+*-api.zip
 
 # windows -> WSL \
 **/*.identifier
