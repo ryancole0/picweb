@@ -5,7 +5,8 @@
   "log-file": "/cache/thumbsup.log",
 
   "title": "Family",
-  "theme": "mosaic",
+  "theme": "cards",
+  "theme-style": "/config/custom.less",
   "home-album-name": "Home",
   "locale": "en",
 
@@ -14,9 +15,9 @@
   "sort-media-by": "date",
 
   "thumb-size": 400,
-  "small-size": 400,
-  "large-size": 1600,
-  "photo-quality": 82,
+  "small-size": 500,
+  "large-size": 1400,
+  "photo-quality": 90,
   "photo-preview": "resize",
   "photo-download": "resize",
 

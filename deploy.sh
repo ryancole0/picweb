@@ -9,6 +9,7 @@ fi
 cp static/staticwebapp.config.json gallery/
 cp static/denied.html gallery/
 cp static/privacy.html gallery/
+cp static/home.html gallery/
 
 # Fetch the current deployment token
 TOKEN=$(az staticwebapp secrets list -n "$SWA" -g "$RG" \

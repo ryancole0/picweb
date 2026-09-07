@@ -1,0 +1,80 @@
+// ---------------------------------------------------------------
+// Palette. Light values are the defaults; the media query swaps
+// them when the visitor's OS is set to dark.
+// ---------------------------------------------------------------
+:root {
+  color-scheme: light dark;
+  --bg:         #ffffff;
+  --text:       #3f3f46;
+  --muted:      #71717a;
+  --line:       #e4e4e7;
+  --accent:     #6d28d9;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg:       #17161b;
+    --text:     #e4e4e7;
+    --muted:    #a1a1aa;
+    --line:     #35323d;
+    --accent:   #a78bfa;
+  }
+}
+
+// ---------------------------------------------------------------
+// Hand the cards theme's four documented variables to the
+// custom properties above.
+// ---------------------------------------------------------------
+@body-background: var(--bg);
+@body-color:      var(--text);
+@header-color:    var(--accent);
+@nav-border:      var(--line);
+
+// ---------------------------------------------------------------
+// Colours the theme hardcodes instead of exposing as variables.
+// ---------------------------------------------------------------
+footer,
+nav.pagination,
+nav.pagination a,
+#zip                 { color: var(--muted); }
+
+footer a,
+#zip a               { color: var(--accent); }
+
+// ---------------------------------------------------------------
+// Responsive layout. Cards floats fixed-width thumbnails, which
+// overflows on phones. Grid instead: the browser picks the column
+// count from available width.
+// ---------------------------------------------------------------
+#media {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 0.4em;
+  list-style: none;
+}
+
+#media li { float: none; margin: 0; }
+
+#media a,
+#media img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+#albums {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 1.5em;
+}
+
+#albums a {
+  width: auto;
+  margin: 0;
+}
+
+// 2em of padding costs 64px — a fifth of a phone screen.
+@media only screen and (max-width: 480px) {
+  #container { padding: 1em; }
+  #albums a  { height: 190px; }
+}

@@ -19,15 +19,16 @@
   "platform": { "apiRuntime": "python:3.11" },
   "routes": [
     { "route": "/.auth/*", "allowedRoles": ["anonymous", "authenticated"] },
-    { "route": "/login", "redirect": "/.auth/login/google" },
+    { "route": "/login", "redirect": "/.auth/login/google?post_login_redirect_uri=/" },
     { "route": "/logout", "redirect": "/.auth/logout" },
     { "route": "/api/GetRoles", "allowedRoles": ["anonymous", "authenticated"] },
     { "route": "/denied.html", "allowedRoles": ["anonymous", "authenticated"] },
     { "route": "/privacy.html", "allowedRoles": ["anonymous", "authenticated"] },
+    { "route": "/home.html", "allowedRoles": ["anonymous", "authenticated"] },
     { "route": "/*", "allowedRoles": ["family"] }
   ],
   "responseOverrides": {
-    "401": { "statusCode": 302, "redirect": "/login" },
+    "401": { "rewrite": "/home.html", "statusCode": 200 },
     "403": { "statusCode": 302, "redirect": "/denied.html" }
   },
   "globalHeaders": {

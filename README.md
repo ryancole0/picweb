@@ -159,7 +159,7 @@ exiftool -overwrite_original -Keywords+="Steder/Bergen" photos/bergen/IMG_0002.j
 
 ## Build html and view
 ```bash
-./build.sh          # or: Ctrl+Shift+B in VS Code
+./build.sh --full-rebuild         # or: Ctrl+Shift+B in VS Code
 ./serve.sh          # run locally open http://localhost:8080
 ./deploy.sh         # deploy static web app
 ```

@@ -3,6 +3,15 @@
 # e.g.  ./build.sh --log info
 set -euo pipefail
 
+FULL_REBUILD=false
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --full-rebuild) FULL_REBUILD=true; shift ;;
+    *) break ;;                      # leave the rest in "$@"
+  esac
+done
+
 THUMBSUP_TAG="2.18.0"
 IMAGE="ghcr.io/thumbsup/thumbsup:${THUMBSUP_TAG}"
 
@@ -29,14 +38,20 @@ case "$PHOTOS" in
     ;;
 esac
 
-rm -rf "$OUT" "$CACHE"
-mkdir -p "$OUT" "$CACHE"
+if [[ "$FULL_REBUILD" == true ]]; then
+  echo "full rebuild - deleting old files"
+  rm -rf "$OUT" "$CACHE"
+  mkdir -p "$OUT" "$CACHE"
+fi
+echo $FULL_REBUILD
+
 
 docker run --rm -t \
   -v "$PHOTOS:/input:ro" \
   -v "$OUT:/output" \
   -v "$CACHE:/cache" \
   -v "$ROOT/thumbsup.json:/config/thumbsup.json:ro" \
+  -v "$ROOT/custom.less:/config/custom.less:ro" \
   -v /etc/localtime:/etc/localtime:ro \
   -u "$(id -u):$(id -g)" \
   "$IMAGE" \
