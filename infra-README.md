@@ -12,7 +12,7 @@
         │  ARM: deployment (start) · Run Command (stop) · complete-mode empty deployment (destroy)
         ▼
  rg-valheim-server  (disposable — wiped on every stop)
-   valheim-vm  B2as_v2, Ubuntu 24.04, region = eastus | southcentralus | swedencentral
+   valheim-vm  D2as_v7, Ubuntu 24.04, region = eastus | southcentralus | swedencentral
    ├─ docker: ghcr.io/lloesche/valheim-server  (UDP 2456-2457, status JSON on :80)
    ├─ restore.sh   boot: pull world from blob
    ├─ sync.sh      every 5 min + on stop: push world + backup zips to blob
@@ -22,7 +22,7 @@
         ▼
  rg-valheim-core  (permanent, ~$0.05/mo)
    stvalheim…  blob container "valheim": worlds_local/  backups/   (versioning + 30-day soft delete)
-   id-valheim-vm  user-assigned identity: Blob Data Contributor on storage, Contributor on rg-valheim-server
+   id-valheim-vm  user-assigned identity: Blob Data Contributor on storage, Valheim Compute Deployer on rg-valheim-server
 ```
 
 Why it's built this way:
@@ -30,7 +30,7 @@ Why it's built this way:
 - **World data never lives on the VM's disk alone.** The VM is cattle. The blob container is the source of truth; the VM pulls at boot and pushes every 5 minutes, on graceful stop, and after each zipped backup. Blob versioning + soft delete let you roll back a bad save from the portal. Cross-region reads of a few MB take seconds, so one storage account serves all three regions.
 - **Exactly one server at a time.** `start` refuses if anything exists in `rg-valheim-server`. Two servers syncing one world would clobber each other.
 - **Destroy = empty complete-mode deployment.** Everything in the RG is deleted (VM, disk, NIC, IP, VNet, NSG). Nothing bills while off. The VM does this to itself, so a `stop` is: save → upload → self-delete, with the SWA API only sending the trigger. `destroy` is the no-questions fallback from the API side.
-- **No role assignments at deploy time.** The VM's identity is pre-created and pre-authorized in `core.bicep`, so the service principal only needs Contributor on the disposable RG (+ Managed Identity Operator on the identity, Reader on core). It can't touch your gallery or anything else.
+- **No role assignments at deploy time.** The VM's identity is pre-created and pre-authorized in `core.bicep`, so the service principal only needs Valheim Compute Deployer on the disposable RG (+ Managed Identity Operator on the identity, Reader on core). It can't touch your gallery or anything else.
 - **Region is a Start-time parameter.** No Azure region is in New York; East US (Virginia) is the practical midpoint for Oslo ↔ Dallas. Rough RTTs: Oslo→East US ~95 ms, Dallas→East US ~35 ms, Oslo→Dallas ~140 ms. Valheim is very tolerant up to ~150 ms; above that you feel it in combat.
 
 ## Files (paths may be outdated after merge with picweb)
@@ -88,7 +88,7 @@ Existing world? Upload your `.db`/`.fwl` to `valheim/worlds_local/` in the stora
 
 | Item | While on | While off |
 |---|---|---|
-| Standard_B2as_v2 (2 vCPU / 8 GiB) East US | ~$0.075/h | 0 |
+| Standard_D2as_v7 (2 vCPU / 8 GiB) East US | ~$0.075/h | 0 |
 | Standard public IP | ~$0.005/h | 0 |
 | 32 GB StandardSSD OS disk | ~$0.003/h | 0 |
 | Storage account (LRS, a few hundred MB with versions) | — | ~$0.05/mo |
@@ -106,7 +106,7 @@ Valheim's server is mostly single-threaded; it scales with **explored world + ac
 |---|---|---|
 | Everyone rubber-bands/lags at once, regardless of location; enemies teleport | CPU-bound | Run Command `docker stats --no-stream` — a steady 100%+ of one core means step up |
 | Fine for the first hour, then degrades in the evening | B-series credits exhausted → throttled | Azure Monitor metric *CPU Credits Remaining* hits 0 → `VALHEIM_VM_SIZE=Standard_D2as_v7` (~$0.086/h, no credits, same RAM) |
-| Server crashes/restarts after long sessions; `free -m` shows <500 MB | RAM (big explored worlds want 10 GB+) | `Standard_B4as_v2` or `Standard_D4as_v5` (16 GiB) |
+| Server crashes/restarts after long sessions; `free -m` shows <500 MB | RAM (big explored worlds want 10 GB+) | `Standard_D4as_v7` or `Standard_D4as_v5` (16 GiB) |
 | Only one household lags; the other is fine | Latency, not the server | Different region for that night |
 | Long "loading world" on join, slow terrain | Disk/boot; not the VM size | Ignore unless persistent; StandardSSD is fine |
 | Status page shows players but nobody can hear/see anyone | Packet loss to region | Change region; check with `ping`/`mtr` to the VM's IP |
@@ -134,30 +134,6 @@ Two custom roles in `infra/roles.bicep`, both with `assignableScopes` limited to
 Neither contains `Microsoft.Authorization/*`, so no principal can widen its own access. The Destroyer has no write action at all — a compromised VM identity can end your game session and nothing else.
 
 Also narrowed: the VM identity's Storage Blob Data Contributor is scoped to the `valheim` **container**, not the account, and the API's Reader on `rg-valheim-core` is gone (it never called ARM there — it reads the storage account name from app settings).
-
-### Migrating off Contributor
-
-```bash
-az deployment sub create -l eastus -f infra/core.bicep -p swaPrincipalObjectId=<objectId>
-
-# remove the old assignments (they are not deleted automatically)
-RG=$(az group show -n rg-valheim-server --query id -o tsv)
-az role assignment list --scope $RG --role Contributor -o table
-az role assignment delete --scope $RG --role Contributor --assignee <swaAppId>
-az role assignment delete --scope $RG --role Contributor --assignee <vmIdentityPrincipalId>
-az role assignment delete --scope $(az group show -n rg-valheim-core --query id -o tsv) --role Reader --assignee <swaAppId>
-
-# smoke test both paths end to end
-```
-
-Then Start a server from the page, let it boot, and Save-and-stop. Custom roles are unforgiving about missing read actions, and the failure mode is a deployment that sits at `Running` rather than an obvious 403. If something fails, find the missing action rather than widening the role:
-
-```bash
-az monitor activity-log list -g rg-valheim-server --offset 30m \
-  --query "[?status.value=='Failed'].{op:operationName.value, msg:properties.statusMessage}" -o json
-```
-
-Role definition changes take a minute or two to propagate, and cached ARM tokens hold old permissions for up to ~5 minutes, so re-test rather than trusting the first failure.
 
 
 ## Reconciling with the existing GetRoles API

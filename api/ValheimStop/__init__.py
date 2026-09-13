@@ -25,6 +25,6 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
     logging.info("valheim: stop by %s", who.get("userDetails"))
     return valheim.json_response(
         {"ok": True,
-         "message": "Server is saving and shutting down. Resources disappear in 2-3 minutes."},
+         "message": "Server is saving and shutting down. Resources disappear in 3-5 minutes."},
         202,
     )

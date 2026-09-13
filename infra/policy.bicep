@@ -11,7 +11,7 @@ targetScope = 'subscription'
 param serverRgName string = 'rg-valheim-server'
 param vmName string = 'valheim-vm'
 param allowedVmSkus array = [
-  'Standard_D2as_v7 '
+  'Standard_D2as_v7'
   'Standard_D4as_v7'
 ]
 param allowedLocations array = [ 'eastus', 'southcentralus', 'swedencentral' ]

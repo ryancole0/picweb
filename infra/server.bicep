@@ -7,8 +7,8 @@
 @allowed([ 'eastus', 'southcentralus', 'swedencentral' ])
 param location string
 
-@description('Cheapest sensible size. B2as_v2 = 2 vCPU / 8 GiB burstable. Step up to Standard_D2as_v5 when credits run dry.')
-param vmSize string = 'Standard_B2as_v2'
+@description('Cheapest sensible size. D2as_v7 = 2 vCPU / 8 GiB burstable. Step up to Standard_D2as_v5 when credits run dry.')
+param vmSize string = 'Standard_D2as_v7'
 
 @description('Set true for Spot (roughly 60-80% cheaper, but Azure can evict you mid-raid).')
 param useSpot bool = false
@@ -42,7 +42,7 @@ Order matters: -preset is read first and overwrites anything before it, so put i
   raids        none | muchless | less | more | muchmore
   setkeys      nobuildcost | playerevents | passivemobs | nomap
 Add -crossplay for console players.''')
-param serverArgs string = '-modifier resources most -modifier portals casual -modifier deathpenalty casual'
+param serverArgs string = ''
 
 param adminUsername string = 'valheim'
 @description('SSH public key. NSG does not expose 22; this is only a VM creation requirement. Use Run Command for admin.')

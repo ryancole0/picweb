@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "1992922461186582260"
+      "templateHash": "4519730566505216962"
     }
   },
   "parameters": {
@@ -19,9 +19,9 @@
     },
     "vmSize": {
       "type": "string",
-      "defaultValue": "Standard_B2as_v2",
+      "defaultValue": "Standard_D2as_v7",
       "metadata": {
-        "description": "Cheapest sensible size. B2as_v2 = 2 vCPU / 8 GiB burstable. Step up to Standard_D2as_v5 when credits run dry."
+        "description": "Cheapest sensible size. D2as_v7 = 2 vCPU / 8 GiB burstable. Step up to Standard_D2as_v5 when credits run dry."
       }
     },
     "useSpot": {
@@ -85,7 +85,7 @@
     },
     "serverArgs": {
       "type": "string",
-      "defaultValue": "-modifier resources most -modifier portals casual -modifier deathpenalty casual",
+      "defaultValue": "",
       "metadata": {
         "description": "Valheim world modifiers, passed through to the server command line.\nOrder matters: -preset is read first and overwrites anything before it, so put it first or omit it.\n  resources    muchless | less | more | muchmore | most     (rounds UP; excludes fish, trophies, boss drops)\n  portals      casual | hard | veryhard                      (casual = metals through portals)\n  deathpenalty casual | veryeasy | easy | hard | hardcore\n  combat       veryeasy | easy | hard | veryhard\n  raids        none | muchless | less | more | muchmore\n  setkeys      nobuildcost | playerevents | passivemobs | nomap\nAdd -crossplay for console players."
       }

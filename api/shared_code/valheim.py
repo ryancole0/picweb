@@ -45,7 +45,7 @@ ARM = "https://management.azure.com"
 API_DEPLOY = "2021-04-01"
 API_COMPUTE = "2024-07-01"
 API_NETWORK = "2024-01-01"
-STOP_GRACE_SECONDS = int(os.environ.get("VALHEIM_STOP_GRACE_SECONDS", "300"))
+STOP_GRACE_SECONDS = int(os.environ.get("VALHEIM_STOP_GRACE_SECONDS", "180"))
 
 _TEMPLATES = Path(__file__).resolve().parent.parent / "templates"
 
