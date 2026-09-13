@@ -31,19 +31,39 @@ PIP_NAME = "valheim-pip"
 REGIONS = {
     "eastus": "East US (Virginia)",
     "southcentralus": "South Central US (Dallas)",
-    "swedencentral": "Sweden Central (Stockholm)",
+    "swedencentral": "Sweden Central (Gävle)",
 }
+
+FQDN_PREFIXS = {
+    "eastus": "east",
+    "southcentralus": "central",
+    "swedencentral": "sweden",
+}
+
 
 ARM = "https://management.azure.com"
 API_DEPLOY = "2021-04-01"
 API_COMPUTE = "2024-07-01"
 API_NETWORK = "2024-01-01"
+STOP_GRACE_SECONDS = int(os.environ.get("VALHEIM_STOP_GRACE_SECONDS", "300"))
 
 _TEMPLATES = Path(__file__).resolve().parent.parent / "templates"
 
 _credential = None
 _session = None
 
+
+def _finished_within(deployment: dict, seconds: int) -> bool:
+    """True if this deployment completed less than `seconds` ago."""
+    stamp = (deployment.get("properties") or {}).get("timestamp")
+    if not stamp:
+        return False
+    try:
+        from datetime import datetime, timezone
+        when = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+        return (datetime.now(timezone.utc) - when).total_seconds() < seconds
+    except ValueError:
+        return False
 
 def _client():
     """Lazily build a credential + HTTP session. Cached for the worker's life."""
@@ -163,9 +183,16 @@ def current_status() -> dict:
     tearing_down = (latest or {}).get("name", "").startswith(("teardown", "destroy"))
 
     if vm is None:
-        if in_flight and not tearing_down:
+        if in_flight:
+            if tearing_down:
+                return {"state": "stopping", "deployment": latest.get("name")}
             region = ((properties.get("parameters") or {}).get("location") or {}).get("value")
             return {"state": "starting", "region": region, "deployment": latest.get("name")}
+        # Deployment finished, but ARM deletes trail it by a minute or two and
+        # a half-deleted RG will collide with a new Start. Hold "stopping"
+        # briefly so the page tells the truth and start() keeps refusing.
+        if tearing_down and _finished_within(latest or {}, STOP_GRACE_SECONDS):
+            return {"state": "stopping", "deployment": latest.get("name")}
         return {"state": "off"}
 
     ip = fqdn = None
@@ -183,10 +210,15 @@ def current_status() -> dict:
     if ip:
         try:
             _, session = _client()
-            probe = session.get(f"http://{ip}/status", timeout=3)
+            probe = session.get(f"http://{ip}/status.json", timeout=3)
             if probe.ok:
-                players = probe.json().get("player_count", 0)
-                server_up = True
+                payload = probe.json()
+                # status.json exists as soon as the container does; an "error"
+                # field means the Steam query failed, so the game server is
+                # not answering yet (or SERVER_PUBLIC is false).
+                if not payload.get("error"):
+                    players = payload.get("player_count", 0)
+                    server_up = True
         except Exception:
             # Normal for the first few minutes: Steam is still downloading.
             pass
@@ -206,7 +238,7 @@ def current_status() -> dict:
         "vmSize": (vm_props.get("hardwareProfile") or {}).get("vmSize"),
         "power": power,
         "ip": ip,
-        "fqdn": fqdn,
+        "fqdn": f'''valheim-{FQDN_PREFIXS.get(vm.get("location"))}.colecreations.no''',
         "joinAddress": f"{ip}:2456" if ip else None,
         "players": players,
         "deployedAt": (vm.get("tags") or {}).get("deployedAt"),

@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "1062242708632689790"
+      "templateHash": "1992922461186582260"
     }
   },
   "parameters": {
@@ -79,6 +79,10 @@
         "description": "Listing the server publicly is what makes the Steam query -- and therefore the player count -- work. Password still required to join."
       }
     },
+    "timestamp": {
+      "type": "string",
+      "defaultValue": "[utcNow('yyyy-MM-ddTHH:mm:ssZ')]"
+    },
     "serverArgs": {
       "type": "string",
       "defaultValue": "-modifier resources most -modifier portals casual -modifier deathpenalty casual",
@@ -95,10 +99,6 @@
       "metadata": {
         "description": "SSH public key. NSG does not expose 22; this is only a VM creation requirement. Use Run Command for admin."
       }
-    },
-    "timestamp": {
-      "type": "string",
-      "defaultValue": "[utcNow()]"
     }
   },
   "variables": {

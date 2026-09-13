@@ -12,6 +12,9 @@ cp static/denied.html gallery/
 cp static/privacy.html gallery/
 cp static/home.html gallery/
 
+# update server config
+az bicep build -f infra/server.bicep --outfile api/templates/server.json
+
 # Fetch the current deployment token
 TOKEN=$(az staticwebapp secrets list -n "$SWA" -g "$RG" \
           --query properties.apiKey -o tsv)

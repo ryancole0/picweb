@@ -48,7 +48,6 @@ Why it's built this way:
 0. **Configure Subscription**
   Add `Microsoft.Network` and `Microsoft.Compute` as a registered providers for the subscription
 
-
 1. **Service principal for the API**
    ```bash
    az ad sp create-for-rbac -n sp-valheim-swa --skip-assignment
@@ -62,7 +61,7 @@ Why it's built this way:
    az deployment sub create -l eastus -f infra/core.bicep -p swaPrincipalObjectId=<objectId>
    az deployment sub show -n core --query properties.outputs   # storageAccountName, vmIdentityResourceId, vmIdentityClientId
    ```
-3. Add policy limiting to only 1 VM
+3. Add policy limiting to only 1 VM, restricting skus (to avoid becoming a crypto platform)
    ```
    az deployment sub create -l eastus -f infra/policy.bicep
    # verify the built-in GUIDs resolved:
@@ -71,7 +70,6 @@ Why it's built this way:
    az vm create -g rg-valheim-server -n not-valheim --image Ubuntu2404 --size Standard_D64s_v5
    # fails by RequestDisallowedByPolicy
    ```
-
 4. **Compile the server template into the API**
    ```bash
    az bicep build -f infra/server.bicep --outfile api/templates/server.json
@@ -80,13 +78,9 @@ Why it's built this way:
 5. **SWA app settings** (Portal → your SWA → Environment variables, or `az staticwebapp appsettings set`)
    `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `AZURE_SUBSCRIPTION_ID`,
    `VALHEIM_STORAGE_ACCOUNT`, `VALHEIM_UAMI_ID`, `VALHEIM_UAMI_CLIENT_ID`,
-   `VALHEIM_SERVER_PASSWORD` (≥5 chars), `VALHEIM_SSH_PUBKEY`,
+   `VALHEIM_SERVER_PASSWORD` (≥5 chars), `VALHEIM_SSH_PUBKEY`, `VALHEIM_SERVER_ARGS` and `VALHEIM_ALLOWLIST`
    optional: `VALHEIM_SERVER_NAME`, `VALHEIM_WORLD_NAME`, `VALHEIM_VM_SIZE`, `VALHEIM_USE_SPOT`.
-6. **Wire into the gallery repo**
-   - Copy the four `Valheim*` folders and `shared_code/` and `templates/` into your existing `api/`, and merge `requirements.txt` (adds `azure-identity` and `requests`). Replace `GetRoles/__init__.py` with the version here. Your `host.json` and `GetRoles/function.json` are unchanged.
-   - Copy `app/valheim.html` into the Thumbsup **output** (or better, a post-build copy step, since Thumbsup regenerates the folder). Merge the routes into your `staticwebapp.config.json`.
-7. **Allow list**: because `rolesSource` is configured, portal invitations are ignored. Add a `VALHEIM_ALLOWLIST` app setting (comma-separated addresses) alongside your existing `FAMILY_ALLOWLIST`. An address must be on both: the family list is the prerequisite, the valheim list grants the extra role. Unset means nobody gets it, which is the safe default for a list that can spend money. Changes take effect at next sign-in (the lists load at cold start), so sign out and back in to test.
-8. **First run**: open `/valheim`, pick a region, Start. First boot downloads the Valheim server from Steam (~1 GB) — 3–5 minutes. Later boots are the same (fresh VM each time) unless you bake an image; not worth it at this play frequency.
+7. **First run**: open `/valheim`, pick a region, Start. First boot downloads the Valheim server from Steam (~1 GB) — 3–5 minutes. Later boots are the same (fresh VM each time) unless you bake an image; not worth it at this play frequency.
 
 Existing world? Upload your `.db`/`.fwl` to `valheim/worlds_local/` in the storage account before the first start and set `VALHEIM_WORLD_NAME` to match.
 

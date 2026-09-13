@@ -55,6 +55,8 @@
 
   .join { background: var(--stone); border: 1px solid var(--stone-edge); border-radius: var(--radius); padding: 1rem; }
   .join .addr { font-size: 1.6rem; font-weight: 800; font-variant-numeric: tabular-nums; word-break: break-all; }
+  .join .addr-ip { font-size: 1rem; color: var(--birch-dim); font-variant-numeric: tabular-nums;
+                   word-break: break-all; margin-top: .15rem; min-height: 1.2rem; }
   .join p { margin: .4rem 0 0; color: var(--birch-dim); font-size: .95rem; }
   dl { display: grid; grid-template-columns: max-content 1fr; gap: .25rem 1rem; margin: 1rem 0 0; }
   dt { color: var(--birch-dim); } dd { margin: 0; }
@@ -83,7 +85,7 @@
         <b>East US (Virginia)</b><span class="ping">~95 ms Oslo · ~35 ms Dallas</span>
         <small>Best compromise when both families are on.</small></label>
       <label class="region"><input type="radio" name="region" value="swedencentral">
-        <b>Sweden Central (Stockholm)</b><span class="ping">~10 ms Oslo · ~130 ms Dallas</span>
+        <b>Sweden Central (Gävle)</b><span class="ping">~25 ms Oslo · ~130 ms Dallas</span>
         <small>When it's just the Norwegians.</small></label>
       <label class="region"><input type="radio" name="region" value="southcentralus">
         <b>South Central US (Dallas)</b><span class="ping">~140 ms Oslo · ~10 ms Dallas</span>
@@ -98,9 +100,10 @@
 
 <!-- STARTING / RUNNING -->
 <section id="panel-on" class="hidden">
-  <div class="join">
+<div class="join">
     <div class="addr" id="addr">…</div>
-    <p>In Valheim: Join game → Join IP → paste this. Password is the usual one.</p>
+    <div class="addr-ip" id="addr-ip"></div>
+    <p>In Valheim: Start Game → Start → Join Game → Add Server → paste this. Password is the usual one.</p>
     <dl>
       <dt>Region</dt><dd id="d-region"></dd>
       <dt>Players</dt><dd id="d-players"></dd>
@@ -127,7 +130,7 @@
 </details>
 
 <script>
-  const HOURLY_USD = 0.085; // B2as_v2 + IP + disk, rough. Update if you change VM size.
+  const HOURLY_USD = 0.10; // D2as_v7 + IP + disk, rough. Update if you change VM size.
   const $ = (id) => document.getElementById(id);
   const api = async (path, opts = {}) => {
     const r = await fetch(`/api/valheim/${path}`, { headers: { "content-type": "application/json" }, ...opts });
@@ -143,6 +146,16 @@
   const say = (t, err = false) => { $("msg").textContent = t; $("msg").className = err ? "err" : ""; };
   const fmtDur = (ms) => { const m = Math.floor(ms / 60000); return m < 60 ? `${m} min` : `${Math.floor(m/60)} h ${m%60} min`; };
   let busy = false, last = null;
+
+  const parseStamp = (s) => {
+    if (!s) return NaN;
+    const t = Date.parse(s);
+    if (Number.isFinite(t)) return t;
+    // ARM's utcNow() defaults to basic ISO 8601 (20260913T112445Z), which
+    // Date.parse rejects. Insert separators and retry.
+    const m = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/.exec(s);
+    return m ? Date.parse(`${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6]}Z`) : NaN;
+  };
 
   function render(s) {
     last = s;
@@ -172,13 +185,21 @@
         sub.textContent = `Server reported "${s.state}". Try reloading.`;
     }
     if (s.ip) {
-      $("addr").textContent = s.joinAddress;
+      // Hostname first: it's stable across sessions for a given region, so it's
+      // the one worth remembering. IP stays visible as a fallback, since not
+      // every client reliably resolves a name in the Join IP field.
+      $("addr").textContent = s.fqdn ? `${s.fqdn}:2456` : s.joinAddress;
+      $("addr-ip").textContent = s.fqdn ? s.joinAddress : "";
       $("d-region").textContent = s.regionLabel ?? s.region ?? "";
       $("d-players").textContent = s.players ?? "—";
-      const up = s.deployedAt ? Date.now() - Date.parse(s.deployedAt) : 0;
-      $("d-uptime").textContent = s.deployedAt ? fmtDur(up) : "—";
-      $("d-cost").textContent = s.deployedAt ? `$${(up / 3.6e6 * HOURLY_USD).toFixed(2)}` : "—";
-    } else { $("addr").textContent = "…"; }
+      const startedAt = parseStamp(s.deployedAt);
+      const up = Number.isFinite(startedAt) ? Date.now() - startedAt : NaN;
+      $("d-uptime").textContent = Number.isFinite(up) ? fmtDur(up) : "—";
+      $("d-cost").textContent = Number.isFinite(up) ? `$${(up / 3.6e6 * HOURLY_USD).toFixed(2)}` : "—";
+    } else {
+      $("addr").textContent = "…";
+      $("addr-ip").textContent = "";
+    }
     $("btn-stop").disabled = busy || !["running", "booting"].includes(s.state);
     $("btn-start").disabled = busy;
   }
@@ -198,7 +219,10 @@
   $("btn-start").onclick = () => act("Starting…", "start", { region: document.querySelector("input[name=region]:checked").value });
   $("btn-stop").onclick = () => act("Asking the server to save and stop…", "stop");
   $("btn-destroy").onclick = () => confirm("Force-delete the server? Up to 5 minutes of play may be lost.") && act("Force deleting…", "destroy");
-  $("btn-copy").onclick = async () => { await navigator.clipboard.writeText($("addr").textContent); say("Address copied."); };
+  $("btn-copy").onclick = async () => {
+    await navigator.clipboard.writeText(last?.joinAddress || $("addr").textContent);
+    say("Address copied.");
+  };
 
   refresh();
   setInterval(refresh, 10000);

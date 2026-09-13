@@ -31,6 +31,8 @@ param maxUptimeMinutes int = 360
 @description('Listing the server publicly is what makes the Steam query -- and therefore the player count -- work. Password still required to join.')
 param serverPublic bool = true
 
+param timestamp string = utcNow('yyyy-MM-ddTHH:mm:ssZ')
+
 @description('''Valheim world modifiers, passed through to the server command line.
 Order matters: -preset is read first and overwrites anything before it, so put it first or omit it.
   resources    muchless | less | more | muchmore | most     (rounds UP; excludes fish, trophies, boss drops)
@@ -45,8 +47,6 @@ param serverArgs string = '-modifier resources most -modifier portals casual -mo
 param adminUsername string = 'valheim'
 @description('SSH public key. NSG does not expose 22; this is only a VM creation requirement. Use Run Command for admin.')
 param adminSshPublicKey string
-
-param timestamp string = utcNow()
 
 var prefix = 'valheim'
 
