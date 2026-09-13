@@ -25,6 +25,11 @@
     { "route": "/denied.html", "allowedRoles": ["anonymous", "authenticated"] },
     { "route": "/privacy.html", "allowedRoles": ["anonymous", "authenticated"] },
     { "route": "/home.html", "allowedRoles": ["anonymous", "authenticated"] },
+
+    { "route": "/valheim", "rewrite": "/valheim.html", "allowedRoles": ["valheim"] },
+    { "route": "/valheim.html", "allowedRoles": ["valheim"] },
+    { "route": "/api/valheim/*", "allowedRoles": ["valheim"] },
+
     { "route": "/*", "allowedRoles": ["family"] }
   ],
   "responseOverrides": {

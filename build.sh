@@ -43,7 +43,6 @@ if [[ "$FULL_REBUILD" == true ]]; then
   rm -rf "$OUT" "$CACHE"
   mkdir -p "$OUT" "$CACHE"
 fi
-echo $FULL_REBUILD
 
 
 docker run --rm -t \

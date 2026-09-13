@@ -1,0 +1,306 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "_generator": {
+      "name": "bicep",
+      "version": "0.46.1.21595",
+      "templateHash": "1062242708632689790"
+    }
+  },
+  "parameters": {
+    "location": {
+      "type": "string",
+      "allowedValues": [
+        "eastus",
+        "southcentralus",
+        "swedencentral"
+      ]
+    },
+    "vmSize": {
+      "type": "string",
+      "defaultValue": "Standard_B2as_v2",
+      "metadata": {
+        "description": "Cheapest sensible size. B2as_v2 = 2 vCPU / 8 GiB burstable. Step up to Standard_D2as_v5 when credits run dry."
+      }
+    },
+    "useSpot": {
+      "type": "bool",
+      "defaultValue": false,
+      "metadata": {
+        "description": "Set true for Spot (roughly 60-80% cheaper, but Azure can evict you mid-raid)."
+      }
+    },
+    "storageAccountName": {
+      "type": "string"
+    },
+    "vmIdentityResourceId": {
+      "type": "string"
+    },
+    "vmIdentityClientId": {
+      "type": "string"
+    },
+    "serverName": {
+      "type": "string",
+      "defaultValue": "Family Valheim"
+    },
+    "worldName": {
+      "type": "string",
+      "defaultValue": "Midgard"
+    },
+    "serverPassword": {
+      "type": "securestring"
+    },
+    "idleMinutes": {
+      "type": "int",
+      "defaultValue": 30,
+      "metadata": {
+        "description": "Minutes with zero players before the VM tears itself down."
+      }
+    },
+    "bootGraceMinutes": {
+      "type": "int",
+      "defaultValue": 20,
+      "metadata": {
+        "description": "Grace period after boot before idle checks start (people need time to join)."
+      }
+    },
+    "maxUptimeMinutes": {
+      "type": "int",
+      "defaultValue": 360,
+      "metadata": {
+        "description": "Absolute ceiling on VM lifetime. Backstop in case the player count is unreadable."
+      }
+    },
+    "serverPublic": {
+      "type": "bool",
+      "defaultValue": true,
+      "metadata": {
+        "description": "Listing the server publicly is what makes the Steam query -- and therefore the player count -- work. Password still required to join."
+      }
+    },
+    "serverArgs": {
+      "type": "string",
+      "defaultValue": "-modifier resources most -modifier portals casual -modifier deathpenalty casual",
+      "metadata": {
+        "description": "Valheim world modifiers, passed through to the server command line.\nOrder matters: -preset is read first and overwrites anything before it, so put it first or omit it.\n  resources    muchless | less | more | muchmore | most     (rounds UP; excludes fish, trophies, boss drops)\n  portals      casual | hard | veryhard                      (casual = metals through portals)\n  deathpenalty casual | veryeasy | easy | hard | hardcore\n  combat       veryeasy | easy | hard | veryhard\n  raids        none | muchless | less | more | muchmore\n  setkeys      nobuildcost | playerevents | passivemobs | nomap\nAdd -crossplay for console players."
+      }
+    },
+    "adminUsername": {
+      "type": "string",
+      "defaultValue": "valheim"
+    },
+    "adminSshPublicKey": {
+      "type": "string",
+      "metadata": {
+        "description": "SSH public key. NSG does not expose 22; this is only a VM creation requirement. Use Run Command for admin."
+      }
+    },
+    "timestamp": {
+      "type": "string",
+      "defaultValue": "[utcNow()]"
+    }
+  },
+  "variables": {
+    "prefix": "valheim",
+    "cloudInitRaw": "#cloud-config\n# Tokens __LIKE_THIS__ are replaced by server.bicep.\npackage_update: true\npackages: [jq, curl, ca-certificates, gnupg]\n\nwrite_files:\n  - path: /opt/valheim/env\n    permissions: \"0600\"\n    content: |\n      STORAGE_ACCOUNT=__STORAGE_ACCOUNT__\n      UAMI_CLIENT_ID=__UAMI_CLIENT_ID__\n      RESOURCE_GROUP=__RESOURCE_GROUP__\n      IDLE_MINUTES=__IDLE_MINUTES__\n      MAX_UPTIME_MINUTES=__MAX_UPTIME_MINUTES__\n      BOOT_GRACE_MINUTES=__BOOT_GRACE_MINUTES__\n      LOCATION=__LOCATION__\n\n  - path: /opt/valheim/docker-compose.yml\n    content: |\n      services:\n        valheim:\n          image: ghcr.io/lloesche/valheim-server\n          container_name: valheim\n          restart: unless-stopped\n          stop_grace_period: 2m          # lets the server save on shutdown\n          cap_add: [SYS_NICE]\n          ports:\n            - \"2456-2457:2456-2457/udp\"\n            - \"80:80/tcp\"\n          volumes:\n            - /opt/valheim/config:/config\n            - /opt/valheim/data:/opt/valheim\n          environment:\n            SERVER_NAME: \"__SERVER_NAME__\"\n            WORLD_NAME: \"__WORLD_NAME__\"\n            SERVER_PASS: \"__SERVER_PASS__\"\n            SERVER_PUBLIC: \"__SERVER_PUBLIC__\"   # true = listed publicly, but also the ONLY way status.json reports players\n            SERVER_ARGS: \"__SERVER_ARGS__\"       # world modifiers; -preset must come first if used\n            STATUS_HTTP: \"true\"\n            STATUS_HTTP_PORT: \"80\"\n            RESTART_CRON: \"\"             # no nightly restart; we don't run long enough to need it\n            UPDATE_CRON: \"\"              # steam update happens on boot anyway\n            BACKUPS_INTERVAL: \"1800\"     # zipped backup every 30 min ...\n            BACKUPS_MAX_AGE: \"3\"\n            POST_BACKUP_HOOK: \"/config/hooks/post-backup.sh @BACKUP_FILE@\"   # ... pushed to blob\n            TZ: \"Europe/Oslo\"\n\n  - path: /opt/valheim/config/hooks/post-backup.sh\n    permissions: \"0755\"\n    content: |\n      #!/bin/sh\n      # Runs INSIDE the container after each backup; hands the file to the host uploader via a queue dir.\n      cp \"$1\" /config/backup-queue/ 2>/dev/null || true\n\n  - path: /opt/valheim/bin/azlogin.sh\n    permissions: \"0755\"\n    content: |\n      #!/bin/bash\n      . /opt/valheim/env\n      az account show >/dev/null 2>&1 || az login --identity --client-id \"$UAMI_CLIENT_ID\" -o none\n\n  - path: /opt/valheim/bin/restore.sh\n    permissions: \"0755\"\n    content: |\n      #!/bin/bash\n      # Pull the world from blob before the server starts. Recursive, so it\n      # restores the 1.0 directory layout exactly as it was uploaded.\n      set -uo pipefail\n      . /opt/valheim/env\n      /opt/valheim/bin/azlogin.sh || { echo \"restore: az login FAILED\" | systemd-cat -t valheim -p err; exit 0; }\n      mkdir -p /opt/valheim/config/worlds_local\n      az storage blob download-batch --auth-mode login --account-name \"$STORAGE_ACCOUNT\" \\\n        -s valheim --pattern 'worlds_local/*' -d /opt/valheim/config --overwrite -o none || true\n      n=$(find /opt/valheim/config/worlds_local -type f 2>/dev/null | wc -l)\n      echo \"restore: $n world files\" | systemd-cat -t valheim\n      [ \"$n\" -eq 0 ] && echo \"restore: no saved world found, a new one will be generated\" | systemd-cat -t valheim -p warning\n      exit 0\n\n  - path: /opt/valheim/bin/sync.sh\n    permissions: \"0755\"\n    content: |\n      #!/bin/bash\n      # Push the world to blob. Every 5 min, and at teardown.\n      #\n      # Valheim 1.0 stores a world as a DIRECTORY of generation-numbered files:\n      #   _main.<N>.db2  _main.<N>.fwl2  _main.<N>.chunks  _main.<N>.ok\n      #   plus coordinate-named terrain chunks (1e_20__1_1.chunk)\n      # N increments on every save, so a plain upload would pile up every\n      # generation forever and restore would mix stale chunks with current ones.\n      # Strategy: upload everything first (blob is never missing a file), then\n      # delete remote files that no longer exist locally. Blob versioning and\n      # 30-day soft delete mean a wrong prune is recoverable from the portal.\n      set -uo pipefail\n      . /opt/valheim/env\n      exec 9>/var/lock/valheim-sync.lock; flock 9\n      /opt/valheim/bin/azlogin.sh || { echo \"sync: az login FAILED\" | systemd-cat -t valheim -p err; exit 1; }\n\n      src=/opt/valheim/config/worlds_local\n      if [ -z \"$(ls -A \"$src\" 2>/dev/null)\" ]; then\n        echo \"sync: worlds_local is empty, nothing to push\" | systemd-cat -t valheim -p warning\n        exit 0\n      fi\n\n      if ! az storage blob upload-batch --auth-mode login --account-name \"$STORAGE_ACCOUNT\" \\\n             -d valheim/worlds_local -s \"$src\" --overwrite -o none; then\n        echo \"sync: UPLOAD FAILED, keeping remote as-is\" | systemd-cat -t valheim -p err\n        exit 1\n      fi\n\n      # Prune stale generations. Only runs after a clean upload.\n      local_list=$(cd \"$src\" && find . -type f -printf '%P\\n' | sort)\n      remote_list=$(az storage blob list --auth-mode login --account-name \"$STORAGE_ACCOUNT\" \\\n        -c valheim --prefix worlds_local/ --query \"[].name\" -o tsv \\\n        | sed 's|^worlds_local/||' | sort)\n      pruned=0\n      while IFS= read -r stale; do\n        [ -z \"$stale\" ] && continue\n        az storage blob delete --auth-mode login --account-name \"$STORAGE_ACCOUNT\" \\\n          -c valheim -n \"worlds_local/$stale\" -o none && pruned=$((pruned+1))\n      done < <(comm -13 <(echo \"$local_list\") <(echo \"$remote_list\"))\n\n      echo \"sync: pushed $(echo \"$local_list\" | wc -l) files, pruned $pruned stale\" | systemd-cat -t valheim\n\n      shopt -s nullglob\n      for f in /opt/valheim/config/backup-queue/*.zip; do\n        # The container's own zip backups are empty on 1.0 (they still look for\n        # the old flat .db/.fwl layout). Drop the useless ones.\n        [ \"$(stat -c%s \"$f\")\" -lt 1024 ] && { rm -f \"$f\"; continue; }\n        az storage blob upload --auth-mode login --account-name \"$STORAGE_ACCOUNT\" \\\n          -c valheim -n \"backups/$(basename \"$f\")\" -f \"$f\" --overwrite -o none && rm -f \"$f\"\n      done\n\n  - path: /opt/valheim/bin/idle-check.sh\n    permissions: \"0755\"\n    content: |\n      #!/bin/bash\n      # Every minute. Tears down only on CONFIRMED emptiness -- an unreadable\n      # player count is treated as \"someone might be playing\", never as idle.\n      # A hard uptime cap bounds the cost if the count is permanently broken.\n      . /opt/valheim/env\n      uptime_min=$(( $(cut -d. -f1 /proc/uptime) / 60 ))\n      f=/run/valheim-idle-minutes\n\n      if [ \"$uptime_min\" -ge \"${MAX_UPTIME_MINUTES:-360}\" ]; then\n        echo \"max uptime ${uptime_min}m reached - tearing down\" | systemd-cat -t valheim\n        systemctl start valheim-teardown.service\n        exit 0\n      fi\n\n      [ \"$uptime_min\" -lt \"$BOOT_GRACE_MINUTES\" ] && exit 0\n\n      players=\"\"\n      body=$(curl -fs --max-time 3 http://127.0.0.1/status.json || true)\n      if [ -n \"$body\" ] && [ \"$(echo \"$body\" | jq -r '.error // \"null\"')\" = \"null\" ]; then\n        players=$(echo \"$body\" | jq -r '.player_count // empty')\n      fi\n\n      if [ -z \"$players\" ]; then\n        # status.json unusable (SERVER_PUBLIC=false, or Steam query not answering).\n        # Fall back to counting connect/disconnect lines in the server log.\n        joins=$(docker logs --since 24h valheim 2>&1 | grep -c 'Got connection SteamID')\n        leaves=$(docker logs --since 24h valheim 2>&1 | grep -c 'Closing socket')\n        players=$(( joins - leaves ))\n        [ \"$players\" -lt 0 ] && players=0\n        source=log\n      else\n        source=status.json\n      fi\n\n      echo \"idle-check: players=$players via $source (up ${uptime_min}m)\" | systemd-cat -t valheim\n\n      if [ \"${players:-1}\" -gt 0 ]; then echo 0 > $f; exit 0; fi\n      n=$(( $(cat $f 2>/dev/null || echo 0) + 1 )); echo $n > $f\n      if [ \"$n\" -ge \"$IDLE_MINUTES\" ]; then\n        echo \"empty for ${n}m - tearing down\" | systemd-cat -t valheim\n        systemctl start valheim-teardown.service\n      fi\n\n  - path: /opt/valheim/bin/teardown.sh\n    permissions: \"0755\"\n    content: |\n      #!/bin/bash\n      # Graceful end of session: stop server (saves), final sync, then delete every resource in the RG.\n      set -uo pipefail\n      . /opt/valheim/env\n      exec 8>/var/lock/valheim-teardown.lock; flock -n 8 || exit 0\n      echo \"teardown: begin\" | systemd-cat -t valheim\n      systemctl stop valheim-sync.timer valheim-idle.timer\n      docker compose -f /opt/valheim/docker-compose.yml stop -t 120 || true\n      /opt/valheim/bin/sync.sh\n      /opt/valheim/bin/azlogin.sh\n      echo \"teardown: deleting resources in $RESOURCE_GROUP\" | systemd-cat -t valheim\n      az deployment group create -g \"$RESOURCE_GROUP\" --mode Complete \\\n        --template-file /opt/valheim/empty.json --name \"teardown-$(date +%s)\" --no-wait -o none\n\n  - path: /opt/valheim/empty.json\n    content: |\n      { \"$schema\": \"https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#\",\n        \"contentVersion\": \"1.0.0.0\", \"resources\": [] }\n\n  - path: /etc/systemd/system/valheim.service\n    content: |\n      [Unit]\n      Description=Valheim server (docker compose)\n      After=docker.service network-online.target\n      Requires=docker.service\n      [Service]\n      Type=oneshot\n      RemainAfterExit=yes\n      WorkingDirectory=/opt/valheim\n      ExecStartPre=/opt/valheim/bin/restore.sh\n      ExecStart=/usr/bin/docker compose up -d\n      ExecStop=/usr/bin/docker compose stop -t 120\n      ExecStopPost=/opt/valheim/bin/sync.sh\n      [Install]\n      WantedBy=multi-user.target\n\n  - path: /etc/systemd/system/valheim-sync.service\n    content: |\n      [Unit]\n      Description=Push Valheim world to blob\n      [Service]\n      Type=oneshot\n      ExecStart=/opt/valheim/bin/sync.sh\n\n  - path: /etc/systemd/system/valheim-sync.timer\n    content: |\n      [Unit]\n      Description=Sync world every 5 minutes\n      [Timer]\n      OnBootSec=10min\n      OnUnitActiveSec=5min\n      [Install]\n      WantedBy=timers.target\n\n  - path: /etc/systemd/system/valheim-idle.service\n    content: |\n      [Unit]\n      Description=Valheim idle check\n      [Service]\n      Type=oneshot\n      ExecStart=/opt/valheim/bin/idle-check.sh\n\n  - path: /etc/systemd/system/valheim-idle.timer\n    content: |\n      [Unit]\n      Description=Idle check every minute\n      [Timer]\n      OnBootSec=2min\n      OnUnitActiveSec=1min\n      [Install]\n      WantedBy=timers.target\n\n  - path: /etc/systemd/system/valheim-teardown.service\n    content: |\n      [Unit]\n      Description=Valheim graceful teardown (save, sync, delete RG contents)\n      [Service]\n      Type=oneshot\n      ExecStart=/opt/valheim/bin/teardown.sh\n\nruncmd:\n  - mkdir -p /opt/valheim/config/backup-queue /opt/valheim/config/worlds_local /opt/valheim/data\n  - curl -fsSL https://get.docker.com | sh\n  - curl -sL https://aka.ms/InstallAzureCLIDeb | bash\n  - systemctl daemon-reload\n  - systemctl enable --now valheim.service valheim-sync.timer valheim-idle.timer\n",
+    "cloudInit": "[replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(variables('cloudInitRaw'), '__STORAGE_ACCOUNT__', parameters('storageAccountName')), '__UAMI_CLIENT_ID__', parameters('vmIdentityClientId')), '__RESOURCE_GROUP__', resourceGroup().name), '__SERVER_NAME__', parameters('serverName')), '__WORLD_NAME__', parameters('worldName')), '__SERVER_PASS__', parameters('serverPassword')), '__IDLE_MINUTES__', string(parameters('idleMinutes'))), '__MAX_UPTIME_MINUTES__', string(parameters('maxUptimeMinutes'))), '__SERVER_PUBLIC__', toLower(string(parameters('serverPublic')))), '__SERVER_ARGS__', parameters('serverArgs')), '__BOOT_GRACE_MINUTES__', string(parameters('bootGraceMinutes'))), '__LOCATION__', parameters('location'))]"
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Network/networkSecurityGroups",
+      "apiVersion": "2024-01-01",
+      "name": "[format('{0}-nsg', variables('prefix'))]",
+      "location": "[parameters('location')]",
+      "properties": {
+        "securityRules": [
+          {
+            "name": "valheim-udp",
+            "properties": {
+              "priority": 100,
+              "direction": "Inbound",
+              "access": "Allow",
+              "protocol": "Udp",
+              "sourceAddressPrefix": "*",
+              "sourcePortRange": "*",
+              "destinationAddressPrefix": "*",
+              "destinationPortRange": "2456-2457"
+            }
+          },
+          {
+            "name": "status-http",
+            "properties": {
+              "priority": 110,
+              "direction": "Inbound",
+              "access": "Allow",
+              "protocol": "Tcp",
+              "sourceAddressPrefix": "Internet",
+              "sourcePortRange": "*",
+              "destinationAddressPrefix": "*",
+              "destinationPortRange": "80"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "type": "Microsoft.Network/virtualNetworks",
+      "apiVersion": "2024-01-01",
+      "name": "[format('{0}-vnet', variables('prefix'))]",
+      "location": "[parameters('location')]",
+      "properties": {
+        "addressSpace": {
+          "addressPrefixes": [
+            "10.66.0.0/24"
+          ]
+        },
+        "subnets": [
+          {
+            "name": "default",
+            "properties": {
+              "addressPrefix": "10.66.0.0/24",
+              "networkSecurityGroup": {
+                "id": "[resourceId('Microsoft.Network/networkSecurityGroups', format('{0}-nsg', variables('prefix')))]"
+              }
+            }
+          }
+        ]
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/networkSecurityGroups', format('{0}-nsg', variables('prefix')))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Network/publicIPAddresses",
+      "apiVersion": "2024-01-01",
+      "name": "[format('{0}-pip', variables('prefix'))]",
+      "location": "[parameters('location')]",
+      "sku": {
+        "name": "Standard"
+      },
+      "properties": {
+        "publicIPAllocationMethod": "Static",
+        "dnsSettings": {
+          "domainNameLabel": "[format('{0}-{1}', variables('prefix'), uniqueString(resourceGroup().id, parameters('location')))]"
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Network/networkInterfaces",
+      "apiVersion": "2024-01-01",
+      "name": "[format('{0}-nic', variables('prefix'))]",
+      "location": "[parameters('location')]",
+      "properties": {
+        "ipConfigurations": [
+          {
+            "name": "ipconfig1",
+            "properties": {
+              "subnet": {
+                "id": "[reference(resourceId('Microsoft.Network/virtualNetworks', format('{0}-vnet', variables('prefix'))), '2024-01-01').subnets[0].id]"
+              },
+              "publicIPAddress": {
+                "id": "[resourceId('Microsoft.Network/publicIPAddresses', format('{0}-pip', variables('prefix')))]"
+              },
+              "privateIPAllocationMethod": "Dynamic"
+            }
+          }
+        ]
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/publicIPAddresses', format('{0}-pip', variables('prefix')))]",
+        "[resourceId('Microsoft.Network/virtualNetworks', format('{0}-vnet', variables('prefix')))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Compute/virtualMachines",
+      "apiVersion": "2024-07-01",
+      "name": "[format('{0}-vm', variables('prefix'))]",
+      "location": "[parameters('location')]",
+      "identity": {
+        "type": "UserAssigned",
+        "userAssignedIdentities": {
+          "[format('{0}', parameters('vmIdentityResourceId'))]": {}
+        }
+      },
+      "tags": {
+        "deployedAt": "[parameters('timestamp')]",
+        "region": "[parameters('location')]"
+      },
+      "properties": {
+        "hardwareProfile": {
+          "vmSize": "[parameters('vmSize')]"
+        },
+        "priority": "[if(parameters('useSpot'), 'Spot', 'Regular')]",
+        "evictionPolicy": "[if(parameters('useSpot'), 'Delete', null())]",
+        "billingProfile": "[if(parameters('useSpot'), createObject('maxPrice', -1), null())]",
+        "storageProfile": {
+          "imageReference": {
+            "publisher": "Canonical",
+            "offer": "ubuntu-24_04-lts",
+            "sku": "server",
+            "version": "latest"
+          },
+          "osDisk": {
+            "createOption": "FromImage",
+            "diskSizeGB": 32,
+            "deleteOption": "Delete",
+            "managedDisk": {
+              "storageAccountType": "StandardSSD_LRS"
+            }
+          }
+        },
+        "osProfile": {
+          "computerName": "valheim",
+          "adminUsername": "[parameters('adminUsername')]",
+          "customData": "[base64(variables('cloudInit'))]",
+          "linuxConfiguration": {
+            "disablePasswordAuthentication": true,
+            "ssh": {
+              "publicKeys": [
+                {
+                  "path": "[format('/home/{0}/.ssh/authorized_keys', parameters('adminUsername'))]",
+                  "keyData": "[parameters('adminSshPublicKey')]"
+                }
+              ]
+            },
+            "patchSettings": {
+              "patchMode": "ImageDefault"
+            }
+          }
+        },
+        "networkProfile": {
+          "networkInterfaces": [
+            {
+              "id": "[resourceId('Microsoft.Network/networkInterfaces', format('{0}-nic', variables('prefix')))]",
+              "properties": {
+                "deleteOption": "Delete"
+              }
+            }
+          ]
+        },
+        "diagnosticsProfile": {
+          "bootDiagnostics": {
+            "enabled": true
+          }
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/networkInterfaces', format('{0}-nic', variables('prefix')))]"
+      ]
+    }
+  ],
+  "outputs": {
+    "publicIp": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Network/publicIPAddresses', format('{0}-pip', variables('prefix'))), '2024-01-01').ipAddress]"
+    },
+    "fqdn": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Network/publicIPAddresses', format('{0}-pip', variables('prefix'))), '2024-01-01').dnsSettings.fqdn]"
+    },
+    "vmName": {
+      "type": "string",
+      "value": "[format('{0}-vm', variables('prefix'))]"
+    }
+  }
+}

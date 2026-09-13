@@ -1,0 +1,1 @@
+server.json is generated:  az bicep build -f infra/server.bicep --outfile api/templates/server.json

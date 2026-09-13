@@ -46,6 +46,15 @@ echo "deb [signed-by=/usr/share/keyrings/nodesource.gpg] https://deb.nodesource.
   | sudo tee /etc/apt/sources.list.d/nodesource.list
 sudo apt update && sudo apt install -y nodejs
 ```
+* install dependencies for api
+```
+uv pip install --target ".python_packages/lib/site-packages" \
+  --python-platform x86_64-manylinux2014 \
+  --python-version 3.11 \
+  --link-mode=copy \
+  -r api/requirements.txt
+```
+
 * modify permissions
 ```bash
 chmod +x build.sh serve.sh deploy.sh size-check.sh update_swa_auth.sh prune-tags.py

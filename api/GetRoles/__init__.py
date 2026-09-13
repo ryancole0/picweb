@@ -8,6 +8,16 @@ identityProvider, userId, userDetails, claims, accessToken. Must respond
 Allowlist source: FAMILY_ALLOWLIST app setting, comma-separated addresses.
 Loaded and normalised once at module load (cold start), not per request.
 
+VALHEIM_ALLOWLIST is a second, narrower list granting the "valheim" role,
+which gates /valheim and /api/valheim/* (the game server create/destroy
+controls). Membership of FAMILY_ALLOWLIST is a prerequisite: an address on
+the valheim list but not the family list gets nothing. If VALHEIM_ALLOWLIST
+is unset, nobody gets the role and the gallery is unaffected -- the safe
+default, since this list can spend money.
+
+Note: because rolesSource is configured, the portal's Role Management
+invitations are ignored. These two app settings are the whole access model.
+
 Set DEBUG_LOG_CLAIMS=true as a temporary app setting to log the raw claims
 list on the next sign-in, to confirm the actual claim type names your OIDC
 provider sends. Turn it back off (or delete the setting) once confirmed --
@@ -21,6 +31,7 @@ import os
 import azure.functions as func
 
 ROLE_FAMILY = "family"
+ROLE_VALHEIM = "valheim"
 
 # Known claim type spellings for email / email_verified across providers.
 # Google's OIDC discovery document uses the plain names below; this list
@@ -58,8 +69,8 @@ def _normalize_email(address: str) -> str:
     return f"{local}@{domain}"
 
 
-def _load_allowlist() -> frozenset:
-    raw = os.environ.get("FAMILY_ALLOWLIST", "")
+def _load_allowlist(setting_name: str) -> frozenset:
+    raw = os.environ.get(setting_name, "")
     addresses = (a.strip() for a in raw.split(","))
     return frozenset(_normalize_email(a) for a in addresses if a)
 
@@ -90,7 +101,8 @@ def _is_truthy_claim(value) -> bool:
 
 
 # Loaded once per cold start, not per request.
-_ALLOWLIST = _load_allowlist()
+_ALLOWLIST = _load_allowlist("FAMILY_ALLOWLIST")
+_VALHEIM_ALLOWLIST = _load_allowlist("VALHEIM_ALLOWLIST")
 
 
 def main(req: func.HttpRequest) -> func.HttpResponse:
@@ -124,12 +136,17 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
         logging.warning("GetRoles: no email found on claims or userDetails")
         return empty
 
-    if _normalize_email(email) not in _ALLOWLIST:
-        logging.info("GetRoles: %s not on allowlist", _normalize_email(email))
+    normalized = _normalize_email(email)
+    if normalized not in _ALLOWLIST:
+        logging.info("GetRoles: %s not on allowlist", normalized)
         return empty
 
+    roles = [ROLE_FAMILY]
+    if normalized in _VALHEIM_ALLOWLIST:
+        roles.append(ROLE_VALHEIM)
+
     return func.HttpResponse(
-        json.dumps({"roles": [ROLE_FAMILY]}),
+        json.dumps({"roles": roles}),
         mimetype="application/json",
         status_code=200,
     )

@@ -1,0 +1,267 @@
+#cloud-config
+# Tokens __LIKE_THIS__ are replaced by server.bicep.
+package_update: true
+packages: [jq, curl, ca-certificates, gnupg]
+
+write_files:
+  - path: /opt/valheim/env
+    permissions: "0600"
+    content: |
+      STORAGE_ACCOUNT=__STORAGE_ACCOUNT__
+      UAMI_CLIENT_ID=__UAMI_CLIENT_ID__
+      RESOURCE_GROUP=__RESOURCE_GROUP__
+      IDLE_MINUTES=__IDLE_MINUTES__
+      MAX_UPTIME_MINUTES=__MAX_UPTIME_MINUTES__
+      BOOT_GRACE_MINUTES=__BOOT_GRACE_MINUTES__
+      LOCATION=__LOCATION__
+
+  - path: /opt/valheim/docker-compose.yml
+    content: |
+      services:
+        valheim:
+          image: ghcr.io/lloesche/valheim-server
+          container_name: valheim
+          restart: unless-stopped
+          stop_grace_period: 2m          # lets the server save on shutdown
+          cap_add: [SYS_NICE]
+          ports:
+            - "2456-2457:2456-2457/udp"
+            - "80:80/tcp"
+          volumes:
+            - /opt/valheim/config:/config
+            - /opt/valheim/data:/opt/valheim
+          environment:
+            SERVER_NAME: "__SERVER_NAME__"
+            WORLD_NAME: "__WORLD_NAME__"
+            SERVER_PASS: "__SERVER_PASS__"
+            SERVER_PUBLIC: "__SERVER_PUBLIC__"   # true = listed publicly, but also the ONLY way status.json reports players
+            SERVER_ARGS: "__SERVER_ARGS__"       # world modifiers; -preset must come first if used
+            STATUS_HTTP: "true"
+            STATUS_HTTP_PORT: "80"
+            RESTART_CRON: ""             # no nightly restart; we don't run long enough to need it
+            UPDATE_CRON: ""              # steam update happens on boot anyway
+            BACKUPS_INTERVAL: "1800"     # zipped backup every 30 min ...
+            BACKUPS_MAX_AGE: "3"
+            POST_BACKUP_HOOK: "/config/hooks/post-backup.sh @BACKUP_FILE@"   # ... pushed to blob
+            TZ: "Europe/Oslo"
+
+  - path: /opt/valheim/config/hooks/post-backup.sh
+    permissions: "0755"
+    content: |
+      #!/bin/sh
+      # Runs INSIDE the container after each backup; hands the file to the host uploader via a queue dir.
+      cp "$1" /config/backup-queue/ 2>/dev/null || true
+
+  - path: /opt/valheim/bin/azlogin.sh
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+      . /opt/valheim/env
+      az account show >/dev/null 2>&1 || az login --identity --client-id "$UAMI_CLIENT_ID" -o none
+
+  - path: /opt/valheim/bin/restore.sh
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+      # Pull the world from blob before the server starts. Recursive, so it
+      # restores the 1.0 directory layout exactly as it was uploaded.
+      set -uo pipefail
+      . /opt/valheim/env
+      /opt/valheim/bin/azlogin.sh || { echo "restore: az login FAILED" | systemd-cat -t valheim -p err; exit 0; }
+      mkdir -p /opt/valheim/config/worlds_local
+      az storage blob download-batch --auth-mode login --account-name "$STORAGE_ACCOUNT" \
+        -s valheim --pattern 'worlds_local/*' -d /opt/valheim/config --overwrite -o none || true
+      n=$(find /opt/valheim/config/worlds_local -type f 2>/dev/null | wc -l)
+      echo "restore: $n world files" | systemd-cat -t valheim
+      [ "$n" -eq 0 ] && echo "restore: no saved world found, a new one will be generated" | systemd-cat -t valheim -p warning
+      exit 0
+
+  - path: /opt/valheim/bin/sync.sh
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+      # Push the world to blob. Every 5 min, and at teardown.
+      #
+      # Valheim 1.0 stores a world as a DIRECTORY of generation-numbered files:
+      #   _main.<N>.db2  _main.<N>.fwl2  _main.<N>.chunks  _main.<N>.ok
+      #   plus coordinate-named terrain chunks (1e_20__1_1.chunk)
+      # N increments on every save, so a plain upload would pile up every
+      # generation forever and restore would mix stale chunks with current ones.
+      # Strategy: upload everything first (blob is never missing a file), then
+      # delete remote files that no longer exist locally. Blob versioning and
+      # 30-day soft delete mean a wrong prune is recoverable from the portal.
+      set -uo pipefail
+      . /opt/valheim/env
+      exec 9>/var/lock/valheim-sync.lock; flock 9
+      /opt/valheim/bin/azlogin.sh || { echo "sync: az login FAILED" | systemd-cat -t valheim -p err; exit 1; }
+
+      src=/opt/valheim/config/worlds_local
+      if [ -z "$(ls -A "$src" 2>/dev/null)" ]; then
+        echo "sync: worlds_local is empty, nothing to push" | systemd-cat -t valheim -p warning
+        exit 0
+      fi
+
+      if ! az storage blob upload-batch --auth-mode login --account-name "$STORAGE_ACCOUNT" \
+             -d valheim/worlds_local -s "$src" --overwrite -o none; then
+        echo "sync: UPLOAD FAILED, keeping remote as-is" | systemd-cat -t valheim -p err
+        exit 1
+      fi
+
+      # Prune stale generations. Only runs after a clean upload.
+      local_list=$(cd "$src" && find . -type f -printf '%P\n' | sort)
+      remote_list=$(az storage blob list --auth-mode login --account-name "$STORAGE_ACCOUNT" \
+        -c valheim --prefix worlds_local/ --query "[].name" -o tsv \
+        | sed 's|^worlds_local/||' | sort)
+      pruned=0
+      while IFS= read -r stale; do
+        [ -z "$stale" ] && continue
+        az storage blob delete --auth-mode login --account-name "$STORAGE_ACCOUNT" \
+          -c valheim -n "worlds_local/$stale" -o none && pruned=$((pruned+1))
+      done < <(comm -13 <(echo "$local_list") <(echo "$remote_list"))
+
+      echo "sync: pushed $(echo "$local_list" | wc -l) files, pruned $pruned stale" | systemd-cat -t valheim
+
+      shopt -s nullglob
+      for f in /opt/valheim/config/backup-queue/*.zip; do
+        # The container's own zip backups are empty on 1.0 (they still look for
+        # the old flat .db/.fwl layout). Drop the useless ones.
+        [ "$(stat -c%s "$f")" -lt 1024 ] && { rm -f "$f"; continue; }
+        az storage blob upload --auth-mode login --account-name "$STORAGE_ACCOUNT" \
+          -c valheim -n "backups/$(basename "$f")" -f "$f" --overwrite -o none && rm -f "$f"
+      done
+
+  - path: /opt/valheim/bin/idle-check.sh
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+      # Every minute. Tears down only on CONFIRMED emptiness -- an unreadable
+      # player count is treated as "someone might be playing", never as idle.
+      # A hard uptime cap bounds the cost if the count is permanently broken.
+      . /opt/valheim/env
+      uptime_min=$(( $(cut -d. -f1 /proc/uptime) / 60 ))
+      f=/run/valheim-idle-minutes
+
+      if [ "$uptime_min" -ge "${MAX_UPTIME_MINUTES:-360}" ]; then
+        echo "max uptime ${uptime_min}m reached - tearing down" | systemd-cat -t valheim
+        systemctl start valheim-teardown.service
+        exit 0
+      fi
+
+      [ "$uptime_min" -lt "$BOOT_GRACE_MINUTES" ] && exit 0
+
+      players=""
+      body=$(curl -fs --max-time 3 http://127.0.0.1/status.json || true)
+      if [ -n "$body" ] && [ "$(echo "$body" | jq -r '.error // "null"')" = "null" ]; then
+        players=$(echo "$body" | jq -r '.player_count // empty')
+      fi
+
+      if [ -z "$players" ]; then
+        # status.json unusable (SERVER_PUBLIC=false, or Steam query not answering).
+        # Fall back to counting connect/disconnect lines in the server log.
+        joins=$(docker logs --since 24h valheim 2>&1 | grep -c 'Got connection SteamID')
+        leaves=$(docker logs --since 24h valheim 2>&1 | grep -c 'Closing socket')
+        players=$(( joins - leaves ))
+        [ "$players" -lt 0 ] && players=0
+        source=log
+      else
+        source=status.json
+      fi
+
+      echo "idle-check: players=$players via $source (up ${uptime_min}m)" | systemd-cat -t valheim
+
+      if [ "${players:-1}" -gt 0 ]; then echo 0 > $f; exit 0; fi
+      n=$(( $(cat $f 2>/dev/null || echo 0) + 1 )); echo $n > $f
+      if [ "$n" -ge "$IDLE_MINUTES" ]; then
+        echo "empty for ${n}m - tearing down" | systemd-cat -t valheim
+        systemctl start valheim-teardown.service
+      fi
+
+  - path: /opt/valheim/bin/teardown.sh
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+      # Graceful end of session: stop server (saves), final sync, then delete every resource in the RG.
+      set -uo pipefail
+      . /opt/valheim/env
+      exec 8>/var/lock/valheim-teardown.lock; flock -n 8 || exit 0
+      echo "teardown: begin" | systemd-cat -t valheim
+      systemctl stop valheim-sync.timer valheim-idle.timer
+      docker compose -f /opt/valheim/docker-compose.yml stop -t 120 || true
+      /opt/valheim/bin/sync.sh
+      /opt/valheim/bin/azlogin.sh
+      echo "teardown: deleting resources in $RESOURCE_GROUP" | systemd-cat -t valheim
+      az deployment group create -g "$RESOURCE_GROUP" --mode Complete \
+        --template-file /opt/valheim/empty.json --name "teardown-$(date +%s)" --no-wait -o none
+
+  - path: /opt/valheim/empty.json
+    content: |
+      { "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+        "contentVersion": "1.0.0.0", "resources": [] }
+
+  - path: /etc/systemd/system/valheim.service
+    content: |
+      [Unit]
+      Description=Valheim server (docker compose)
+      After=docker.service network-online.target
+      Requires=docker.service
+      [Service]
+      Type=oneshot
+      RemainAfterExit=yes
+      WorkingDirectory=/opt/valheim
+      ExecStartPre=/opt/valheim/bin/restore.sh
+      ExecStart=/usr/bin/docker compose up -d
+      ExecStop=/usr/bin/docker compose stop -t 120
+      ExecStopPost=/opt/valheim/bin/sync.sh
+      [Install]
+      WantedBy=multi-user.target
+
+  - path: /etc/systemd/system/valheim-sync.service
+    content: |
+      [Unit]
+      Description=Push Valheim world to blob
+      [Service]
+      Type=oneshot
+      ExecStart=/opt/valheim/bin/sync.sh
+
+  - path: /etc/systemd/system/valheim-sync.timer
+    content: |
+      [Unit]
+      Description=Sync world every 5 minutes
+      [Timer]
+      OnBootSec=10min
+      OnUnitActiveSec=5min
+      [Install]
+      WantedBy=timers.target
+
+  - path: /etc/systemd/system/valheim-idle.service
+    content: |
+      [Unit]
+      Description=Valheim idle check
+      [Service]
+      Type=oneshot
+      ExecStart=/opt/valheim/bin/idle-check.sh
+
+  - path: /etc/systemd/system/valheim-idle.timer
+    content: |
+      [Unit]
+      Description=Idle check every minute
+      [Timer]
+      OnBootSec=2min
+      OnUnitActiveSec=1min
+      [Install]
+      WantedBy=timers.target
+
+  - path: /etc/systemd/system/valheim-teardown.service
+    content: |
+      [Unit]
+      Description=Valheim graceful teardown (save, sync, delete RG contents)
+      [Service]
+      Type=oneshot
+      ExecStart=/opt/valheim/bin/teardown.sh
+
+runcmd:
+  - mkdir -p /opt/valheim/config/backup-queue /opt/valheim/config/worlds_local /opt/valheim/data
+  - curl -fsSL https://get.docker.com | sh
+  - curl -sL https://aka.ms/InstallAzureCLIDeb | bash
+  - systemctl daemon-reload
+  - systemctl enable --now valheim.service valheim-sync.timer valheim-idle.timer

@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Valheim server</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Alegreya:ital,wght@0,400;0,600;0,800;1,400&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --night: #1c2833;      /* fjord at dusk */
+    --stone: #27384a;
+    --stone-edge: #3a4f66;
+    --birch: #efe6d3;      /* text */
+    --birch-dim: #b7ad9a;
+    --ember: #e28a3a;      /* the one warm thing on the page */
+    --moss: #86b46f;
+    --rust: #c9553b;
+    --radius: 6px;
+  }
+  * { box-sizing: border-box; }
+  html { background: var(--night); color: var(--birch); font: 18px/1.5 "Alegreya", Georgia, serif; }
+  body { margin: 0; padding: 2.5rem 1.25rem 4rem; max-width: 34rem; margin-inline: auto; }
+  a { color: inherit; }
+
+  h1 { font-size: 1rem; font-weight: 400; color: var(--birch-dim); margin: 0 0 .25rem; letter-spacing: .01em; }
+  #headline { font-size: 2.6rem; line-height: 1.1; font-weight: 800; margin: 0 0 .5rem; min-height: 2.9rem; text-wrap: balance; }
+  #headline .on   { color: var(--moss); }
+  #headline .busy { color: var(--ember); }
+  #sub { color: var(--birch-dim); margin: 0 0 2rem; min-height: 1.5rem; font-style: italic; }
+
+  section { margin-bottom: 2rem; }
+  fieldset { border: 0; padding: 0; margin: 0 0 1rem; }
+  legend { padding: 0; margin-bottom: .6rem; font-weight: 600; }
+
+  .regions { display: grid; gap: .5rem; }
+  .region { position: relative; display: grid; grid-template-columns: 1fr auto; gap: .25rem 1rem; align-items: baseline;
+            padding: .8rem 1rem; background: var(--stone); border: 1px solid var(--stone-edge); border-radius: var(--radius); cursor: pointer; }
+  .region input { position: absolute; opacity: 0; inset: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; }
+  .region:has(input:checked) { border-color: var(--ember); box-shadow: inset 0 0 0 1px var(--ember); }
+  .region:has(input:focus-visible) { outline: 2px solid var(--birch); outline-offset: 2px; }
+  .region b { font-weight: 600; }
+  .region small { color: var(--birch-dim); font-size: .85rem; grid-column: 1 / -1; }
+  .region .ping { color: var(--birch-dim); font-size: .9rem; font-variant-numeric: tabular-nums; }
+
+  button { font: inherit; font-weight: 600; border-radius: var(--radius); padding: .75rem 1.25rem; cursor: pointer;
+           border: 1px solid transparent; color: var(--night); background: var(--ember); }
+  button:hover { filter: brightness(1.08); }
+  button:focus-visible { outline: 2px solid var(--birch); outline-offset: 2px; }
+  button:disabled { opacity: .45; cursor: not-allowed; filter: none; }
+  button.quiet { background: transparent; color: var(--birch); border-color: var(--stone-edge); }
+  button.danger { background: transparent; color: var(--rust); border-color: var(--rust); }
+  .row { display: flex; flex-wrap: wrap; gap: .6rem; align-items: center; }
+
+  .join { background: var(--stone); border: 1px solid var(--stone-edge); border-radius: var(--radius); padding: 1rem; }
+  .join .addr { font-size: 1.6rem; font-weight: 800; font-variant-numeric: tabular-nums; word-break: break-all; }
+  .join p { margin: .4rem 0 0; color: var(--birch-dim); font-size: .95rem; }
+  dl { display: grid; grid-template-columns: max-content 1fr; gap: .25rem 1rem; margin: 1rem 0 0; }
+  dt { color: var(--birch-dim); } dd { margin: 0; }
+
+  #msg { min-height: 1.5rem; color: var(--birch-dim); }
+  #msg.err { color: var(--rust); }
+  details { color: var(--birch-dim); font-size: .95rem; }
+  details p { margin: .5rem 0; }
+  .hidden { display: none !important; }
+  @media (prefers-reduced-motion: no-preference) { .pulse { animation: pulse 1.6s ease-in-out infinite; } }
+  @keyframes pulse { 50% { opacity: .55; } }
+</style>
+</head>
+<body>
+
+<h1>Valheim server</h1>
+<p id="headline">Checking…</p>
+<p id="sub"></p>
+
+<!-- OFF: choose region, start -->
+<section id="panel-off" class="hidden">
+  <fieldset>
+    <legend>Where should the server live tonight?</legend>
+    <div class="regions">
+      <label class="region"><input type="radio" name="region" value="eastus" checked>
+        <b>East US (Virginia)</b><span class="ping">~95 ms Oslo · ~35 ms Dallas</span>
+        <small>Best compromise when both families are on.</small></label>
+      <label class="region"><input type="radio" name="region" value="swedencentral">
+        <b>Sweden Central (Stockholm)</b><span class="ping">~10 ms Oslo · ~130 ms Dallas</span>
+        <small>When it's just the Norwegians.</small></label>
+      <label class="region"><input type="radio" name="region" value="southcentralus">
+        <b>South Central US (Dallas)</b><span class="ping">~140 ms Oslo · ~10 ms Dallas</span>
+        <small>When it's mostly the Dallas side.</small></label>
+    </div>
+  </fieldset>
+  <div class="row">
+    <button id="btn-start">Start server</button>
+    <span id="cost-hint" class="ping" style="color:var(--birch-dim)"></span>
+  </div>
+</section>
+
+<!-- STARTING / RUNNING -->
+<section id="panel-on" class="hidden">
+  <div class="join">
+    <div class="addr" id="addr">…</div>
+    <p>In Valheim: Join game → Join IP → paste this. Password is the usual one.</p>
+    <dl>
+      <dt>Region</dt><dd id="d-region"></dd>
+      <dt>Players</dt><dd id="d-players"></dd>
+      <dt>Up for</dt><dd id="d-uptime"></dd>
+      <dt>Cost so far</dt><dd id="d-cost"></dd>
+    </dl>
+  </div>
+  <p style="color:var(--birch-dim);font-size:.95rem;margin:.75rem 0 1rem">
+    The server saves and shuts itself down after 30 minutes with nobody on. You can also stop it now.
+  </p>
+  <div class="row">
+    <button id="btn-stop" class="quiet">Save and stop</button>
+    <button id="btn-copy" class="quiet">Copy address</button>
+  </div>
+</section>
+
+<p id="msg"></p>
+
+<details>
+  <summary>If something is stuck</summary>
+  <p>"Save and stop" asks the server to save the world, upload it, and delete itself. That takes 2–3 minutes.
+     If the page still shows a server after 10 minutes, force-delete everything. You may lose up to 5 minutes of play.</p>
+  <button id="btn-destroy" class="danger">Force delete server</button>
+</details>
+
+<script>
+  const HOURLY_USD = 0.085; // B2as_v2 + IP + disk, rough. Update if you change VM size.
+  const $ = (id) => document.getElementById(id);
+  const api = async (path, opts = {}) => {
+    const r = await fetch(`/api/valheim/${path}`, { headers: { "content-type": "application/json" }, ...opts });
+    // The 401 override rewrites to home.html with a 200, so a non-JSON body
+    // means the session expired rather than anything being wrong with the API.
+    if (!(r.headers.get("content-type") || "").includes("application/json")) {
+      throw new Error("Sign-in expired — reload the page to sign in again.");
+    }
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || `${r.status} ${r.statusText}`);
+    return j;
+  };
+  const say = (t, err = false) => { $("msg").textContent = t; $("msg").className = err ? "err" : ""; };
+  const fmtDur = (ms) => { const m = Math.floor(ms / 60000); return m < 60 ? `${m} min` : `${Math.floor(m/60)} h ${m%60} min`; };
+  let busy = false, last = null;
+
+  function render(s) {
+    last = s;
+    const h = $("headline"), sub = $("sub");
+    $("panel-off").classList.toggle("hidden", s.state !== "off");
+    $("panel-on").classList.toggle("hidden", !["booting", "running", "stopping", "starting"].includes(s.state));
+    h.classList.remove("pulse");
+    switch (s.state) {
+      case "off":
+        h.innerHTML = "The server is <span>off</span>."; sub.textContent = "Nothing is running, nothing is billing.";
+        $("cost-hint").textContent = `about $${HOURLY_USD.toFixed(2)} per hour while on`;
+        break;
+      case "starting":
+        h.innerHTML = `<span class="busy">Raising</span> the server in ${s.region ?? "…"}`; h.classList.add("pulse");
+        sub.textContent = "Creating the VM. About a minute."; break;
+      case "booting":
+        h.innerHTML = `<span class="busy">Waking</span> Valheim in ${s.regionLabel}`; h.classList.add("pulse");
+        sub.textContent = "Installing and restoring the world. Usually 3–5 minutes; the address below will work once this says running."; break;
+      case "running":
+        h.innerHTML = `<span class="on">Running</span> in ${s.regionLabel}`;
+        sub.textContent = s.players ? `${s.players} ${s.players === 1 ? "viking" : "vikings"} online.` : "Nobody on yet."; break;
+      case "stopping":
+        h.innerHTML = `<span class="busy">Saving</span> and shutting down`; h.classList.add("pulse");
+        sub.textContent = "World is being uploaded, then the VM deletes itself."; break;
+      default:
+        h.textContent = "Unknown state";
+        sub.textContent = `Server reported "${s.state}". Try reloading.`;
+    }
+    if (s.ip) {
+      $("addr").textContent = s.joinAddress;
+      $("d-region").textContent = s.regionLabel ?? s.region ?? "";
+      $("d-players").textContent = s.players ?? "—";
+      const up = s.deployedAt ? Date.now() - Date.parse(s.deployedAt) : 0;
+      $("d-uptime").textContent = s.deployedAt ? fmtDur(up) : "—";
+      $("d-cost").textContent = s.deployedAt ? `$${(up / 3.6e6 * HOURLY_USD).toFixed(2)}` : "—";
+    } else { $("addr").textContent = "…"; }
+    $("btn-stop").disabled = busy || !["running", "booting"].includes(s.state);
+    $("btn-start").disabled = busy;
+  }
+
+  async function refresh() {
+    try { render(await api("status")); if ($("msg").classList.contains("err")) say(""); }
+    catch (e) { say(e.message === "403" ? "You do not have access to this page." : `Can't read status: ${e.message}`, true); }
+  }
+
+  async function act(label, path, body) {
+    busy = true; say(label);
+    try { const r = await api(path, { method: "POST", body: JSON.stringify(body ?? {}) }); say(r.message ?? ""); }
+    catch (e) { say(e.message, true); }
+    finally { busy = false; refresh(); }
+  }
+
+  $("btn-start").onclick = () => act("Starting…", "start", { region: document.querySelector("input[name=region]:checked").value });
+  $("btn-stop").onclick = () => act("Asking the server to save and stop…", "stop");
+  $("btn-destroy").onclick = () => confirm("Force-delete the server? Up to 5 minutes of play may be lost.") && act("Force deleting…", "destroy");
+  $("btn-copy").onclick = async () => { await navigator.clipboard.writeText($("addr").textContent); say("Address copied."); };
+
+  refresh();
+  setInterval(refresh, 10000);
+</script>
+</body>
+</html>

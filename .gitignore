@@ -9,6 +9,8 @@ gallery_prev/
 gallery/
 .cache/
 *-api.zip
+*-app.zip
+
 
 # windows -> WSL \
 **/*.identifier
