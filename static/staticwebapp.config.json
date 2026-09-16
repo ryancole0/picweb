@@ -18,9 +18,13 @@
   },
   "platform": { "apiRuntime": "python:3.11" },
   "routes": [
-    { "route": "/.auth/*", "allowedRoles": ["anonymous", "authenticated"] },
+     { "route": "/.auth/*", "allowedRoles": ["anonymous", "authenticated"] },
     { "route": "/login", "redirect": "/.auth/login/google?post_login_redirect_uri=/" },
-    { "route": "/logout", "redirect": "/.auth/logout" },
+    {
+      "route": "/logout",
+      "redirect": "/.auth/logout?post_logout_redirect_uri=/home.html",
+      "headers": { "Clear-Site-Data": "\"cache\"" }
+    },
     { "route": "/api/GetRoles", "allowedRoles": ["anonymous", "authenticated"] },
     { "route": "/denied.html", "allowedRoles": ["anonymous", "authenticated"] },
     { "route": "/privacy.html", "allowedRoles": ["anonymous", "authenticated"] },
@@ -30,13 +34,16 @@
     { "route": "/valheim.html", "allowedRoles": ["valheim"] },
     { "route": "/api/valheim/*", "allowedRoles": ["valheim"] },
 
+    { "route": "/media/*", "allowedRoles": ["family"],
+      "headers": { "Cache-Control": "private, max-age=86400" } },
     { "route": "/*", "allowedRoles": ["family"] }
   ],
   "responseOverrides": {
-    "401": { "rewrite": "/home.html", "statusCode": 200 },
+    "401": { "rewrite": "/home.html", "statusCode": 401 },
     "403": { "statusCode": 302, "redirect": "/denied.html" }
   },
   "globalHeaders": {
-    "X-Robots-Tag": "noindex, nofollow"
+    "X-Robots-Tag": "noindex, nofollow",
+    "Cache-Control": "no-cache"
   }
 }

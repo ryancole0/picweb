@@ -130,20 +130,39 @@
 </details>
 
 <script>
+  const LOGIN_URL = "/.auth/login/google?post_login_redirect_uri=" + encodeURIComponent("/valheim");
+  class AuthError extends Error {}
+  let timer = null;
+
   const HOURLY_USD = 0.10; // D2as_v7 + IP + disk, rough. Update if you change VM size.
   const $ = (id) => document.getElementById(id);
-  const api = async (path, opts = {}) => {
-    const r = await fetch(`/api/valheim/${path}`, { headers: { "content-type": "application/json" }, ...opts });
-    // The 401 override rewrites to home.html with a 200, so a non-JSON body
-    // means the session expired rather than anything being wrong with the API.
-    if (!(r.headers.get("content-type") || "").includes("application/json")) {
-      throw new Error("Sign-in expired — reload the page to sign in again.");
-    }
-    const j = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(j.error || `${r.status} ${r.statusText}`);
+   const api = async (path, opts = {}) => {
+    const r = await fetch(`/api/valheim/${path}`, {
+      cache: "no-store",
+      headers: { "content-type": "application/json" },
+      ...opts,
+    });
+    if (r.status === 401) throw new AuthError("signed-out");
+    if (r.redirected && new URL(r.url).pathname === "/denied.html") throw new AuthError("denied");
+    const isJson = (r.headers.get("content-type") || "").includes("application/json");
+    const j = isJson ? await r.json().catch(() => ({})) : {};
+    if (!r.ok || !isJson) throw new Error(j.error || `${r.status} ${r.statusText || "unexpected response"}`);
     return j;
   };
   const say = (t, err = false) => { $("msg").textContent = t; $("msg").className = err ? "err" : ""; };
+
+  const showAuthError = (kind) => {
+    clearInterval(timer);
+    const m = $("msg");
+    m.className = "err";
+    if (kind === "denied") { m.textContent = "This account doesn't have access to the server controls."; return; }
+    m.textContent = "Your sign-in has expired. ";
+    const a = document.createElement("a");
+    a.href = LOGIN_URL;
+    a.textContent = "Sign in again";
+    m.append(a);
+  };
+
   const fmtDur = (ms) => { const m = Math.floor(ms / 60000); return m < 60 ? `${m} min` : `${Math.floor(m/60)} h ${m%60} min`; };
   let busy = false, last = null;
 
@@ -206,13 +225,13 @@
 
   async function refresh() {
     try { render(await api("status")); if ($("msg").classList.contains("err")) say(""); }
-    catch (e) { say(e.message === "403" ? "You do not have access to this page." : `Can't read status: ${e.message}`, true); }
+    catch (e) { e instanceof AuthError ? showAuthError(e.message) : say(`Can't read status: ${e.message}`, true); }
   }
 
   async function act(label, path, body) {
     busy = true; say(label);
     try { const r = await api(path, { method: "POST", body: JSON.stringify(body ?? {}) }); say(r.message ?? ""); }
-    catch (e) { say(e.message, true); }
+    catch (e) { e instanceof AuthError ? showAuthError(e.message) : say(e.message, true); }
     finally { busy = false; refresh(); }
   }
 

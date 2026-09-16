@@ -82,10 +82,29 @@
     profile. The email address is used only to check it against the family
     invite list and decide whether to show you the albums. No other Google
     data is read, and nothing is written to your Google account.</p>
-    <a class="button" href="/login">Sign in with Google</a>
+    <a class="button" id="signin" href="/login">Sign in with Google</a>
     <p><a href="/privacy.html">Privacy policy</a></p>
     
   </div>
 </body>
 </html>
 
+<script>
+  (function () {
+    var path = location.pathname;
+    var landing = path === "/" || path === "/home.html" || path === "/index.html";
+    var back = landing ? "/" : path + location.search;
+    var url = "/.auth/login/google?post_login_redirect_uri=" + encodeURIComponent(back);
+    document.getElementById("signin").href = url;
+    if (landing) return;
+
+    // Deep link while signed out: go straight to Google. The guard stops a
+    // redirect loop if sign-in ever fails to set the session cookie.
+    try {
+      var last = Number(sessionStorage.getItem("loginBounce") || 0);
+      if (Date.now() - last < 30000) return;
+      sessionStorage.setItem("loginBounce", String(Date.now()));
+    } catch (e) { return; }
+    location.replace(url);
+  })();
+</script>

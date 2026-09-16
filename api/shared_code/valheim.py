@@ -123,6 +123,7 @@ def json_response(payload: dict, status_code: int = 200) -> func.HttpResponse:
         json.dumps(payload),
         mimetype="application/json",
         status_code=status_code,
+        headers={"Cache-Control": "no-store"},
     )
 
 
