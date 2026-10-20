@@ -42,7 +42,7 @@ Order matters: -preset is read first and overwrites anything before it, so put i
   raids        none | muchless | less | more | muchmore
   setkeys      nobuildcost | playerevents | passivemobs | nomap
 Add -crossplay for console players.''')
-param serverArgs string = ''
+param serverArgs string = '-modifier DeathPenalty veryeasy'
 
 param adminUsername string = 'valheim'
 @description('SSH public key. NSG does not expose 22; this is only a VM creation requirement. Use Run Command for admin.')
