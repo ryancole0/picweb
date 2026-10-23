@@ -65,16 +65,34 @@ write_files:
       #!/bin/bash
       # Pull the world from blob before the server starts. Recursive, so it
       # restores the 1.0 directory layout exactly as it was uploaded.
+      #!/bin/bash
       set -uo pipefail
       . /opt/valheim/env
-      /opt/valheim/bin/azlogin.sh || { echo "restore: az login FAILED" | systemd-cat -t valheim -p err; exit 0; }
-      mkdir -p /opt/valheim/config/worlds_local
-      az storage blob download-batch --auth-mode login --account-name "$STORAGE_ACCOUNT" \
-        -s valheim --pattern 'worlds_local/*' -d /opt/valheim/config --overwrite -o none || true
-      n=$(find /opt/valheim/config/worlds_local -type f 2>/dev/null | wc -l)
-      echo "restore: $n world files" | systemd-cat -t valheim
-      [ "$n" -eq 0 ] && echo "restore: no saved world found, a new one will be generated" | systemd-cat -t valheim -p warning
-      exit 0
+      exec 9>/var/lock/valheim-sync.lock; flock 9            # sync can't run mid-restore
+      log() { echo "restore: $1" | systemd-cat -t valheim -p "${2:-info}"; }
+      dst=/opt/valheim/config/worlds_local
+      mkdir -p "$dst" /var/lib/valheim
+
+      # Reboot of a parked VM: local disk is newer than blob, don't clobber it.
+      [ -f /var/lib/valheim/restored ] && { log "already restored on this disk, skipping"; exit 0; }
+
+      /opt/valheim/bin/azlogin.sh || { log "az login FAILED" err; exit 1; }
+      remote=$(az storage blob list --auth-mode login --account-name "$STORAGE_ACCOUNT" \
+        -c valheim --prefix worlds_local/ --num-results '*' --query 'length(@)' -o tsv) \
+        || { log "cannot list remote world" err; exit 1; }
+
+      if [ "$remote" -eq 0 ]; then
+        [ "${ALLOW_NEW_WORLD:-false}" = true ] || { log "no world in blob, ALLOW_NEW_WORLD unset" err; exit 1; }
+        log "no saved world, a new one will be generated" warning
+      else
+        az storage blob download-batch --auth-mode login --account-name "$STORAGE_ACCOUNT" \
+          -s valheim --pattern 'worlds_local/*' -d /opt/valheim/config --overwrite -o none \
+          || { log "download FAILED" err; exit 1; }
+        n=$(find "$dst" -type f | wc -l)
+        [ "$n" -eq "$remote" ] || { log "restored $n of $remote files" err; exit 1; }
+        /opt/valheim/bin/snapshot.sh pre-session || log "pre-session snapshot failed" warning
+      fi
+      touch /var/lib/valheim/restored
 
   - path: /opt/valheim/bin/sync.sh
     permissions: "0755"
@@ -94,6 +112,11 @@ write_files:
       . /opt/valheim/env
       exec 9>/var/lock/valheim-sync.lock; flock 9
       /opt/valheim/bin/azlogin.sh || { echo "sync: az login FAILED" | systemd-cat -t valheim -p err; exit 1; }
+      
+      [ -f /var/lib/valheim/restored ] || {
+        echo "sync: restore never completed, refusing to sync" | systemd-cat -t valheim -p err
+        exit 1
+      }
 
       src=/opt/valheim/config/worlds_local
       if [ -z "$(ls -A "$src" 2>/dev/null)" ]; then
@@ -184,6 +207,19 @@ write_files:
       set -uo pipefail
       . /opt/valheim/env
       exec 8>/var/lock/valheim-teardown.lock; flock -n 8 || exit 0
+
+      if [ -f /var/lib/valheim/restored ]; then
+        ok=
+        for i in 1 2 3; do /opt/valheim/bin/sync.sh && { ok=1; break; }; sleep 60; done
+        if [ -z "$ok" ]; then
+          echo "teardown: final sync FAILED, deallocating instead of deleting" | systemd-cat -t valheim -p err
+          /opt/valheim/bin/azlogin.sh
+          az vm deallocate -g "$RESOURCE_GROUP" -n valheim-vm --no-wait
+          exit 1
+        fi
+        /opt/valheim/bin/snapshot.sh final || true
+      fi
+
       echo "teardown: begin" | systemd-cat -t valheim
       systemctl stop valheim-sync.timer valheim-idle.timer
       docker compose -f /opt/valheim/docker-compose.yml stop -t 120 || true

@@ -176,3 +176,127 @@ exiftool -overwrite_original -Keywords+="Steder/Bergen" photos/bergen/IMG_0002.j
 ## Update allowed user list
 * edit `.secrets/family-allowlist.txt` to add/remove users
 * run `./update_swa_auth.sh` to update "list of allowed users" environment variable in SWA
+
+
+# Play the server world locally
+
+This guide downloads the latest copy of the server world from blob storage and loads it as a local world in the Valheim client. Use it to play offline, host from your own PC for a night, or check the state of a backup.
+
+The blob container is the source of truth for the server. Restoring the world locally is **read-only** on the Azure side and changes nothing for the next server start. Pushing a locally played world *back* to the server is a separate step, described at the end.
+
+## 1. Make sure the server is off
+
+The copy in blob storage is only as fresh as the last sync. When the server is running, that means up to one game save behind (30 minutes by default). After a normal "Save and stop", the blob copy is final.
+
+Check the state on `/valheim`, or from the CLI:
+
+```bash
+az vm show -g rg-valheim-server -n valheim-vm --query name -o tsv 2>/dev/null \
+  && echo "server is running: stop it first for the final copy" \
+  || echo "server is off"
+```
+
+## 2. One-time setup: give yourself read access to the world
+
+Shared-key access is disabled on the storage account, so every download uses your Entra ID login. Subscription Owner does **not** include data-plane access. Grant yourself read on the `valheim` container once:
+
+```bash
+source .env   # provides VALHEIM_STORAGE_ACCOUNT
+SA="$VALHEIM_STORAGE_ACCOUNT"
+
+SA_ID=$(az storage account show -n "$SA" -g rg-valheim-core --query id -o tsv)
+ME=$(az ad signed-in-user show --query id -o tsv)
+
+az role assignment create \
+  --assignee-object-id "$ME" --assignee-principal-type User \
+  --role "Storage Blob Data Reader" \
+  --scope "$SA_ID/blobServices/default/containers/valheim"
+```
+
+The role assignment can take a few minutes to take effect. If the download in the next step returns `AuthorizationPermissionMismatch`, wait and retry.
+
+## 3. Download the latest world
+
+```bash
+source .env
+SA="$VALHEIM_STORAGE_ACCOUNT"
+OUT="$HOME/valheim-restore/$(date +%Y%m%d-%H%M)"
+mkdir -p "$OUT"
+
+az storage blob download-batch --auth-mode login --account-name "$SA" \
+  -s valheim --pattern 'worlds_local/*' -d "$OUT" -o none
+
+# Sanity check: local file count should match the blob count
+remote=$(az storage blob list --auth-mode login --account-name "$SA" \
+  -c valheim --prefix worlds_local/ --num-results '*' --query 'length(@)' -o tsv)
+local=$(find "$OUT/worlds_local" -type f | wc -l)
+echo "remote: $remote   downloaded: $local"
+ls -la "$OUT/worlds_local"
+```
+
+The download lands in `$OUT/worlds_local/`, laid out exactly as the server stored it. The server runs with its save directory at `/config`, which is the same structure the client uses, so nothing needs renaming.
+
+The world name is whatever `VALHEIM_WORLD_NAME` is set to on the SWA (default `Midgard`). You should see files carrying that name.
+
+Keep the timestamped folder. It is a free point-in-time backup.
+
+## 4. Copy it into the game's save folder
+
+Valheim keeps local worlds here:
+
+| Client | Folder |
+|---|---|
+| Windows | `%USERPROFILE%\AppData\LocalLow\IronGate\Valheim\worlds_local\` |
+| Windows, seen from WSL | `/mnt/c/Users/<you>/AppData/LocalLow/IronGate/Valheim/worlds_local/` |
+| Linux (Steam native) | `~/.config/unity3d/IronGate/Valheim/worlds_local/` |
+
+**Close Valheim first.** The game rewrites its world list on exit.
+
+From WSL, to a Windows install:
+
+```bash
+WIN_USER=$(cmd.exe /c 'echo %USERNAME%' 2>/dev/null | tr -d '\r')
+DEST="/mnt/c/Users/$WIN_USER/AppData/LocalLow/IronGate/Valheim/worlds_local"
+mkdir -p "$DEST"
+
+# Back up whatever is there now; a same-named local world would be overwritten.
+[ -n "$(ls -A "$DEST" 2>/dev/null)" ] && \
+  cp -a "$DEST" "${DEST}.bak-$(date +%Y%m%d-%H%M)"
+
+cp -a "$OUT/worlds_local/." "$DEST/"
+```
+
+The trailing `/.` copies the *contents*. If the world doesn't appear in the game, check that you haven't ended up with `worlds_local/worlds_local/`.
+
+Don't rename the files to avoid a name clash with an existing local world. The world name is also stored inside the world data. Move the old world aside instead, which the backup step above already does.
+
+## 5. Load it in Valheim
+
+1. Update the client in Steam first. The server installs the newest game build on every boot, so the world may have been saved by a newer version than your client. An older client can refuse to load it.
+2. Start Game → pick your character → Start.
+3. In the world list, make sure you are viewing **local** worlds, not cloud worlds, and select the server world.
+4. Leave **Start server** unticked to play alone. Tick it to host for others from your PC; they join via your IP or Steam friends.
+
+Characters are not part of the world. They live on each player's own machine (`characters_local`), so everyone keeps their own inventory and skills exactly as they had them on the server.
+
+## Optional: push a locally played world back to the server
+
+Only do this if you deliberately want the server to continue from your local progress. It replaces the server world.
+
+1. Make sure the server is **off** (step 1), and nobody starts it while you work.
+2. Your account needs **Storage Blob Data Contributor** on the container. Use the step 2 command with that role instead of Reader.
+3. Clear the remote world and upload the local one. Clearing first matters: stale generation files left in blob would be restored next to your new ones.
+
+```bash
+SRC="/mnt/c/Users/$WIN_USER/AppData/LocalLow/IronGate/Valheim/worlds_local"
+
+az storage blob delete-batch --auth-mode login --account-name "$SA" \
+  -s valheim --pattern 'worlds_local/*'
+
+az storage blob upload-batch --auth-mode login --account-name "$SA" \
+  -d valheim/worlds_local -s "$SRC" -o none
+```
+
+Upload only the server world's files. If your local `worlds_local` holds other worlds, copy the server world into a clean folder and upload that instead.
+
+Versioning and the 30-day soft delete keep the previous server world recoverable from the portal if this goes wrong. Remove the Contributor role afterwards if you don't need it day to day.

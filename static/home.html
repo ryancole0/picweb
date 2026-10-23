@@ -72,6 +72,42 @@
   }
 </style>
 </head>
+<script>
+(function () {
+  var KEY = "picweb.signedIn";
+  var GUARD = "picweb.autoLoginAt";
+  var params = new URLSearchParams(location.search);
+
+  // The 401 override is a rewrite, so location is the page they actually wanted.
+  var target = location.pathname === "/home.html" ? "/" : location.pathname + location.search;
+  var loginUrl = "/.auth/login/google?post_login_redirect_uri=" + encodeURIComponent(target);
+
+  var btn = document.getElementById("signin");
+  btn.href = loginUrl;
+  btn.addEventListener("click", function () {
+    try { localStorage.setItem(KEY, "1"); } catch (e) {}
+  });
+
+  // Explicit sign-out: forget them, don't bounce back in.
+  if (params.has("signedout")) {
+    try { localStorage.removeItem(KEY); } catch (e) {}
+    return;
+  }
+
+  var returning = false;
+  try { returning = localStorage.getItem(KEY) === "1"; } catch (e) {}
+  if (!returning) return;
+
+  // Loop guard: if cookies are blocked, login "succeeds" but we land here again.
+  // Allow one automatic attempt per minute, then show the normal page.
+  var last = 0;
+  try { last = Number(sessionStorage.getItem(GUARD)) || 0; } catch (e) {}
+  if (Date.now() - last < 60000) return;
+  try { sessionStorage.setItem(GUARD, String(Date.now())); } catch (e) {}
+
+  location.replace(loginUrl);
+})();
+</script>
 <body>
   <div class="card">
     <h1>Cole - Ullvang Picture Gallery</h1>

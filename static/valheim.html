@@ -136,19 +136,54 @@
 
   const HOURLY_USD = 0.10; // D2as_v7 + IP + disk, rough. Update if you change VM size.
   const $ = (id) => document.getElementById(id);
-   const api = async (path, opts = {}) => {
+  const api = async (path, opts = {}) => {
+  const LOGIN_GUARD = "valheim.reloginAt";
+  let leaving = false;
+
+  // Ask the platform directly. /.auth/me is never behind the role check, so it
+  // reports clientPrincipal: null exactly when the session cookie is gone.
+  async function sessionExpired() {
+    try {
+      const r = await fetch("/.auth/me", { cache: "no-store" });
+      const j = await r.json();
+      return !(j && j.clientPrincipal);
+    } catch {
+      return false; // can't tell, so don't redirect
+    }
+  }
+
+  // Go straight to the login endpoint: /.auth/* is never cached, so this can't
+  // be short-circuited the way location.reload() was. At most once per minute.
+  function signBackIn() {
+    let last = 0;
+    try { last = Number(sessionStorage.getItem(LOGIN_GUARD)) || 0; } catch {}
+    if (Date.now() - last < 60000) return false;
+    try { sessionStorage.setItem(LOGIN_GUARD, String(Date.now())); } catch {}
+    leaving = true;
+    say("Session expired — signing you back in…");
+    location.replace("/.auth/login/google?post_login_redirect_uri=" + encodeURIComponent(location.pathname));
+    return true;
+  }
+
+  const api = async (path, opts = {}) => {
+    if (leaving) return new Promise(() => {}); // navigating away; ignore timer ticks
     const r = await fetch(`/api/valheim/${path}`, {
       cache: "no-store",
       headers: { "content-type": "application/json" },
       ...opts,
     });
-    if (r.status === 401) throw new AuthError("signed-out");
-    if (r.redirected && new URL(r.url).pathname === "/denied.html") throw new AuthError("denied");
-    const isJson = (r.headers.get("content-type") || "").includes("application/json");
-    const j = isJson ? await r.json().catch(() => ({})) : {};
-    if (!r.ok || !isJson) throw new Error(j.error || `${r.status} ${r.statusText || "unexpected response"}`);
+    if (!(r.headers.get("content-type") || "").includes("application/json")) {
+      if (await sessionExpired()) {
+        if (signBackIn()) return new Promise(() => {});
+        throw new Error("Sign-in expired and automatic sign-in didn't work. Reload the page.");
+      }
+      throw new Error(`Unexpected ${r.status} response from the server (not a sign-in problem).`);
+    }
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || `${r.status} ${r.statusText}`);
     return j;
   };
+
   const say = (t, err = false) => { $("msg").textContent = t; $("msg").className = err ? "err" : ""; };
 
   const showAuthError = (kind) => {
@@ -199,6 +234,11 @@
       case "stopping":
         h.innerHTML = `<span class="busy">Saving</span> and shutting down`; h.classList.add("pulse");
         sub.textContent = "World is being uploaded, then the VM deletes itself."; break;
+      case "parked":
+        h.innerHTML = `<span class="busy">Parked</span> in ${s.regionLabel}`;
+        sub.textContent = "The last save didn't reach the cloud, so the server was shut down with its disk kept. "
+          + "Start the VM from the Azure portal and use Save and stop to retry, or Force delete to discard the session.";
+        break;
       default:
         h.textContent = "Unknown state";
         sub.textContent = `Server reported "${s.state}". Try reloading.`;

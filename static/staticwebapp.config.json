@@ -18,11 +18,11 @@
   },
   "platform": { "apiRuntime": "python:3.11" },
   "routes": [
-     { "route": "/.auth/*", "allowedRoles": ["anonymous", "authenticated"] },
+    { "route": "/.auth/*", "allowedRoles": ["anonymous", "authenticated"] },
     { "route": "/login", "redirect": "/.auth/login/google?post_login_redirect_uri=/" },
     {
       "route": "/logout",
-      "redirect": "/.auth/logout?post_logout_redirect_uri=/home.html",
+      "redirect": "/.auth/logout?post_logout_redirect_uri=%2Fhome.html%3Fsignedout",
       "headers": { "Clear-Site-Data": "\"cache\"" }
     },
     { "route": "/api/GetRoles", "allowedRoles": ["anonymous", "authenticated"] },
@@ -30,8 +30,8 @@
     { "route": "/privacy.html", "allowedRoles": ["anonymous", "authenticated"] },
     { "route": "/home.html", "allowedRoles": ["anonymous", "authenticated"] },
 
-    { "route": "/valheim", "rewrite": "/valheim.html", "allowedRoles": ["valheim"] },
-    { "route": "/valheim.html", "allowedRoles": ["valheim"] },
+    { "route": "/valheim", "rewrite": "/valheim.html", "allowedRoles": ["valheim"], "headers": { "Cache-Control": "no-store" }  },
+    { "route": "/valheim.html", "allowedRoles": ["valheim"], "headers": { "Cache-Control": "no-store" }  },
     { "route": "/api/valheim/*", "allowedRoles": ["valheim"] },
 
     { "route": "/media/*", "allowedRoles": ["family"],

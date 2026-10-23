@@ -41,6 +41,10 @@ var deletes = [
   'Microsoft.Network/networkSecurityGroups/delete'
 ]
 
+var deallocates = [
+  'Microsoft.Compute/virtualMachines/deallocate/action'
+]
+
 // ---------------------------------------------------------------------------
 // Deployer — used by the SWA API. Can stand the server up, tear it down, and
 // send a Run Command. Cannot create anything that isn't in this list, which
@@ -91,7 +95,7 @@ resource destroyer 'Microsoft.Authorization/roleDefinitions@2022-04-01' = {
     assignableScopes: [ serverRgId ]
     permissions: [
       {
-        actions: union(common, reads, deletes)
+        actions: union(common, reads, deletes, deallocates)
         notActions: []
         dataActions: []
         notDataActions: []

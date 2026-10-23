@@ -233,7 +233,12 @@ def current_status() -> dict:
     )
 
     return {
-        "state": "stopping" if (in_flight and tearing_down) else ("running" if server_up else "booting"),
+        "state": (
+            "stopping" if (in_flight and tearing_down)
+            else "parked" if power in ("deallocating", "deallocated", "stopped")
+            else "running" if server_up
+            else "booting"
+        ),
         "region": vm.get("location"),
         "regionLabel": REGIONS.get(vm.get("location")),
         "vmSize": (vm_props.get("hardwareProfile") or {}).get("vmSize"),
